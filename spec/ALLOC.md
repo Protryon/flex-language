@@ -1,11 +1,5 @@
 # Memory Allocation Scheme
 
-## Class Referencability
-
-Classes, if not RAII defined inside another class, are pointers. That is, they are never null, and always initialized.
-
-Otherwise, they are treated like n-length arrays, see below.
-
 ## Pointers
 
 Pointers are always managed manually. No attempt should be made to automate their destruction due to to their unrestrained power.
@@ -61,6 +55,16 @@ They may also transition to local or non-local arrays, and are sourced from them
 A local to global transition is a shallow copy, however any arrays that must become global should be optimized accordingly.
 
 Any global to local transition is a pointer copy, and the global is not freed.
+
+## Class Referencability
+
+Class variables, if declared as a class variable, are pointers if they are not defined in the initializer only, and non-self-referential directly or indirectly.
+
+The `this` keyword is always a pointer to a class, and never null.
+
+Function arguments and local variables will be allocated on the call stack, but used as pointers.
+
+Non-local variables are allocated on the call stack, hoisted.
 
 ### Dynamic Memory
 
