@@ -13,6 +13,7 @@ const char* whitespace = "                                                      
 #define PROG_ERROR_AST(module, node, expecting) PROG_ERROR(node, "Error: %s @ %lu:%lu.\n%s\n%s^", expecting COMMA node->start_line COMMA node->start_col COMMA arraylist_getptr(module->file->lines, node->start_line) COMMA whitespace + ((node->start_col - 1) > 256 ? 0 : (256 - (node->start_col - 1))))
 
 struct prog_type* gen_prog_type(struct ast_node* node, uint8_t is_master, uint8_t is_generic) {
+    if (node == NULL) return NULL;
     struct prog_type* t = scalloc(sizeof(struct prog_type));
     t->type = PROG_TYPE_UNKNOWN;
     t->is_master = is_master;
@@ -442,7 +443,7 @@ void scope_module_types(struct prog_state* state, struct prog_module* mod) {
 }
 
 void provide_master_types(struct prog_state* state, struct prog_module* mod, struct prog_class* clas, struct prog_func* func, struct prog_type* type, uint8_t no_immed_generics) {    
-    if (type->is_master || type->master_type != NULL) return;
+    if (type == NULL || type->is_master || type->master_type != NULL) return;
     struct prog_type* master = clas == NULL || no_immed_generics ? NULL : hashmap_get(clas->type->generics, type->name); // TODO: generics
     if (master == NULL) {
         master = hashmap_get(mod->types, type->name);

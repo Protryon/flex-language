@@ -37,7 +37,7 @@ Allowed modifiers:
 
 ## Function
 
-A function is a series of expressions. They can be nested inside modules or classes.
+A function is a series of expressions. They can be nested inside modules, classes, or other functions.
 
 They can be declared using the `func` keyword, or via lambda expressions.
 
@@ -48,41 +48,126 @@ Allowed modifiers:
 * `synch`: All children of the containing classes are written to atomically. Redundant if the class is marked `synch`.
 * `virt`: If the parent class is inherited, this function will be implicitly called by its overridding functions.
 
+Syntax:
+
+`func return_type name(u32 arg1, u32 arg2 = 632, u32... argn) expr`
+
+Note that names are optional, and empty for constructors of classes and initializers of modules.
+
+Expressions are required after a function declaration, however an empty body or semicolon may be used to indicate no effect.
+
+Functions are first class objects.
+
+### Lambdas
+
+A lambda can be declared in a module, class, or internal to a function. They are identical in function to functions, except that a name cannot be specified.
+
+Syntax:
+
+`<u32 arg1, u32 arg2> return_type => expr`
+
+The return type is optional, but recomended in cases of primitives being returned.
+
+As flex is strongly and statically typed, all argument types are explicit.
+
 ## Expressions
+
+## Functions and Lambdas
+
+All functions and lambdas are expressions, equivilant to a `lang.function` type.
+
+### Body
+
+Bodies, aka blocks, are used to group multiple expressions together, the last of which is result of the body expression. If none are present, then 
+
+Syntax:
+
+`{ expr1 expr2 expr3 }`
+
+### Variable Declarations
+
+Variable declarations, allowed in functions, classes, and modules, declare a new variable in the current scope.
+
+Variable declarations are expressions, with their returned value being their initialized value, or a default (i.e. 0, null, etc).
+
+Keywords (only valid in class/module):
+* `csig`: C signature, like functions.
+* `synch`: The variable is atomic for all accesses. Note that the compiler will automatically designate `synch`.
+
+Scope destroys a variable, including when created more deeply than a body expression. The following is valid:
+
+`ret uint32 myVar = 7, someFunc(myVar), myVar`
+
+Note that sequence expressions are not possible inside variable initializers.
+
+### Unary Postfix
+
+
+
+### Unary Prefix
+
+
+
+### Call
+
+
+
+### Calculated Member
+
+
+
+### Cast
+
+
+
+### Binary
+
+### Type
+
+### Integer Literal
+
+### Decimal Literal
+
+### String Literal
+
+### Char Literal
+
+### Identifer
+
+### Ternary
+
+### If
 
 ### For
 
-`for (int i = 0; i < 10; i++) {}`
-
-### For In
-
-`for (int i : myArray) {}`
-
-`for (void* entry, int index : myObject) {}`
-
 ### While
 
-`while (x < 5) {}`
-
-### Do
-
-`do {} while (x < 5)`
-
-### If, Else If
-
-`if (x < 5) {} else if (x < 10) {} else {};`
+### For Each
 
 ### Switch
 
-`switch (x) {case 5: break; case 10: default: }`
+### Goto & Label
 
-### Goto
+### Ret
 
-`goto label;`
+### Continue
 
-`label:`
+### Break
 
-### Mathematics
+### Try
+
+### Throw
+
+### Catch
+
+### Finally
+
+### New
+
+### Inferenced New
+
+### Null
+
 
 Defined operators:
 * `+`
@@ -210,6 +295,7 @@ Defined keywords:
 * `imstack`
 * `bitarray`
 * `concat`
+* `single`
 * `pair`
 * `tuple`
 * `tuple3`

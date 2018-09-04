@@ -1394,8 +1394,10 @@ struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens
         } while (EAT(TOKEN_COMMA));
         EXPECT_TOKEN(TOKEN_GT, ">");
     }
-    node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
-    CHECK_EXPR_AND(node->data.func.return_type, free_ast_node(node));
+    if (MATCH_TYPE()) {
+        node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
+        CHECK_EXPR_AND(node->data.func.return_type, free_ast_node(node));
+    }
     EXPECT_TOKEN(TOKEN_ARROW, "=>");
     node->data.func.body = parse_expression_maybe_semicolon(ctx, tokens, token_count);
     CHECK_EXPR_AND(node->data.func.body, free_ast_node(node));
