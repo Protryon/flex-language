@@ -119,3 +119,21 @@ size_t arraylist_add(struct arraylist* list, uint64_t value) {
 size_t arraylist_addptr(struct arraylist* list, void* value) {
     return arraylist_add(list, (uint64_t)value);
 }
+
+ssize_t arraylist_index(struct arraylist* list, uint64_t value) {
+    for (size_t i = 0; i < list->entry_count; i++) {
+        if (*arraylist_get(list, i) == value) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+ssize_t arraylist_indexptr(struct arraylist* list, void* value) {
+    for (size_t i = 0; i < list->entry_count; i++) {
+        if (arraylist_getptr(list, i) == value) {
+            return i;
+        }
+    }
+    return -1;
+}

@@ -4,9 +4,15 @@
 #include "ast.h"
 #include "hash.h"
 
+struct prog_file {
+    char* filename;
+    char* rel_path;
+    struct arraylist* lines;
+};
+
 struct prog_module {
     char* name;
-    char* filename;
+    struct prog_file* file;
     uint8_t prot;
     struct prog_module* parent;
     struct hashmap* submodules;
@@ -14,8 +20,8 @@ struct prog_module {
     struct hashmap* funcs;
     struct hashmap* vars;
     struct hashmap* types;
-    struct hashmap* imported_funcs;
-    struct hashmap* imported_vars;
+    struct hsahmap* node_map;
+    struct arraylist* imported_modules;
 };
 
 #define PROG_NODE_AST_NODE 0
@@ -27,6 +33,7 @@ struct prog_module {
 #define PROG_NODE_CAPTURED_REF 6
 #define PROG_NODE_THIS_REF 7
 #define PROG_NODE_LOCAL_DECL 8
+#define PROG_NODE_EXTRACTED_FUNC_REF 9
 
 struct prog_node {
     uint8_t prog_type;
@@ -39,6 +46,7 @@ struct prog_node {
         struct prog_var* captured;
         struct prog_var* _this;
         struct prog_type* type;
+        struct prog_func* func;
     } data;
 };
 
@@ -54,6 +62,7 @@ struct prog_class {
     struct arraylist* parents;
     struct hashmap* funcs;
     struct hashmap* vars;
+    struct hashmap* node_map;
 };
 
 struct prog_func {
@@ -69,7 +78,8 @@ struct prog_func {
     uint8_t csig;
     struct prog_type* return_type;
     struct hashmap* arguments;
-    //TODO: body
+    struct hashmap* node_map;
+    struct arraylist* closures;
     struct {
         struct ast_node* body;
     } proc;
@@ -86,6 +96,7 @@ struct prog_var { // only interfunc vars
     uint8_t async;
     uint8_t csig;
     struct prog_type* type;
+    struct hashmap* node_map;
     struct {
         struct ast_node* init;
         struct arraylist* cons_init;
@@ -137,7 +148,8 @@ struct prog_type {
     uint8_t variadic;
     uint8_t is_master;
     struct prog_type* master_type;
-    struct arraylist* generics;
+    struct ast_node* ast;
+    struct hashmap* generics;
     union {
         struct {
             struct prog_class* clas;
@@ -152,7 +164,8 @@ struct prog_state {
     struct hashmap* imports; // external modules of prog_modules
     struct hashmap* modules; // does not include submodules
     struct hashmap* extracted_funcs; // all program funcs
-
+    struct arraylist* errors;
+    struct hashmap* node_map;
 };
 
 #endif

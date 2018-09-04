@@ -132,6 +132,7 @@ struct ast_node_body {
 struct ast_node_file {
     char* filename;
     char* rel_path;
+    struct arraylist* lines;
     struct ast_node* body;
 };
 
@@ -383,7 +384,7 @@ struct parse_intermediates {
     struct ast_node* root;
 };
 
-struct parse_intermediates parse(struct arraylist* tokens);
+struct parse_intermediates parse(struct arraylist* tokens_list, struct arraylist* lines);
 
 void free_ast_node(struct ast_node* node);
 

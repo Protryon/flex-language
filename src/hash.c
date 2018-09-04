@@ -4,25 +4,35 @@
 #include "hash.h"
 #include "smem.h"
 
-uint32_t hashmap_hash(char* key) {
+uint64_t hashmap_hash(char* key, size_t size) {
     if (key == NULL) return 0;
     size_t kl = strlen(key);
     size_t i = 0;
-    uint32_t hash = 0x88888888;
-    for(; i < kl; i += 4) {
-        uint32_t v = *(uint32_t*)&key[i];
-        hash = (hash << 5) ^ v;
+    uint64_t hash = 0x8888888888888888;
+    for(; i < kl; i += 8) {
+        uint64_t v = *(uint64_t*)&key[i];
+        hash = hash ^ v;
     }
-    if (kl > 4) {
-        uint32_t v = *(uint32_t*)&key[kl - 4];
-        hash = (hash << 5) ^ v;
+    if (kl >= 8) {
+        uint64_t v = *(uint64_t*)&key[kl - 8];
+        hash = hash ^ v;
     } else {
         for(i = 0; i < kl; i++) {
             uint8_t v = key[i];
-            hash = (hash << 2) ^ v;
+            hash = hash ^ (v << (8 * i));
         }
     }
-    hash = (hash << 5) ^ kl;
+    hash = hash ^ kl;
+    // a loop would get marginally better hashes, but be a bit slower
+    if (size <= 0xFFFFFFFF) {
+        hash = (hash >> 32) ^ (hash & 0xFFFFFFFF);
+    }
+    if (size <= 0xFFFF) {
+        hash = (hash >> 16) ^ (hash & 0xFFFF);
+    }
+    if (size <= 0xFF) {
+        hash = (hash >> 8) ^ (hash & 0xFF);
+    }
     return hash;
 }
 
@@ -67,8 +77,8 @@ void free_hashset(struct hashset* set) {
 }
 
 void* hashmap_get(struct hashmap* hashmap, char* key) {
-    uint32_t hashum = hashmap_hash(key);
-    uint32_t hash = hashum % hashmap->bucket_count;
+    uint64_t hashum = hashmap_hash(key, hashmap->bucket_count);
+    uint64_t hash = hashum % hashmap->bucket_count;
     for (struct hashmap_bucket_entry* bucket = hashmap->buckets[hash]; bucket != NULL; bucket = bucket->next) {
         if (bucket->umod_hash == hashum && (key == bucket->key || (key != NULL && strcmp(bucket->key, key) == 0))) {
             return bucket->data;
@@ -78,7 +88,7 @@ void* hashmap_get(struct hashmap* hashmap, char* key) {
 }
 
 void* hashmap_getptr(struct hashmap* hashmap, void* key) {
-    uint32_t hash = (uint64_t)key % hashmap->bucket_count;
+    uint64_t hash = (uint64_t)key % hashmap->bucket_count;
     for (struct hashmap_bucket_entry* bucket = hashmap->buckets[hash]; bucket != NULL; bucket = bucket->next) {
         if (bucket->umod_hash == key && bucket->key == NULL) {
             return bucket->data;
@@ -88,8 +98,8 @@ void* hashmap_getptr(struct hashmap* hashmap, void* key) {
 }
 
 int hashset_has(struct hashset* set, char* key) {
-    uint32_t hashum = hashmap_hash(key);
-    uint32_t hash = hashum % set->bucket_count;
+    uint64_t hashum = hashmap_hash(key, set->bucket_count);
+    uint64_t hash = hashum % set->bucket_count;
     for (struct hashset_bucket_entry* bucket = set->buckets[hash]; bucket != NULL; bucket = bucket->next) {
         if (bucket->umod_hash == hashum && strcmp(bucket->key, key) == 0) {
             return 1;
@@ -99,7 +109,7 @@ int hashset_has(struct hashset* set, char* key) {
 }
 
 int hashset_hasptr(struct hashset* set, void* key) {
-    uint32_t hash = (uint64_t)key % set->bucket_count;
+    uint64_t hash = (uint64_t)key % set->bucket_count;
     for (struct hashset_bucket_entry* bucket = set->buckets[hash]; bucket != NULL; bucket = bucket->next) {
         if (bucket->key == key) {
             return 1;
@@ -109,8 +119,8 @@ int hashset_hasptr(struct hashset* set, void* key) {
 }
 
 void hashmap_put(struct hashmap* hashmap, char* key, void* data) {
-    uint32_t hashum = hashmap_hash(key);
-    uint32_t hash = hashum % hashmap->bucket_count;
+    uint64_t hashum = hashmap_hash(key, hashmap->bucket_count);
+    uint64_t hash = hashum % hashmap->bucket_count;
     struct hashmap_bucket_entry* bucket = hashmap->buckets[hash];
     if (bucket == NULL) {
         bucket = smalloc(sizeof(struct hashmap_bucket_entry));
@@ -142,7 +152,7 @@ void hashmap_put(struct hashmap* hashmap, char* key, void* data) {
 }
 
 void hashmap_putptr(struct hashmap* hashmap, void* key, void* data) {
-    uint32_t hash = (uint64_t)key % hashmap->bucket_count;
+    uint64_t hash = (uint64_t)key % hashmap->bucket_count;
     struct hashmap_bucket_entry* bucket = hashmap->buckets[hash];
     if (bucket == NULL) {
         bucket = smalloc(sizeof(struct hashmap_bucket_entry));
@@ -210,8 +220,8 @@ void hashmap_fixcap(struct hashmap* hashmap) {
 }
 
 void hashset_add(struct hashset* set, char* key) {
-    uint32_t hashum = hashmap_hash(key);
-    uint32_t hash = hashum % set->bucket_count;
+    uint64_t hashum = hashmap_hash(key, set->bucket_count);
+    uint64_t hash = hashum % set->bucket_count;
     struct hashset_bucket_entry* bucket = set->buckets[hash];
     if (bucket == NULL) {
         bucket = smalloc(sizeof(struct hashset_bucket_entry));
@@ -240,7 +250,7 @@ void hashset_add(struct hashset* set, char* key) {
 }
 
 void hashset_addptr(struct hashset* set, void* key) {
-    uint32_t hash = (uint64_t)key % set->bucket_count;
+    uint64_t hash = (uint64_t)key % set->bucket_count;
     struct hashset_bucket_entry* bucket = set->buckets[hash];
     if (bucket == NULL) {
         bucket = smalloc(sizeof(struct hashset_bucket_entry));

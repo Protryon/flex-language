@@ -257,7 +257,8 @@ int main(int argc, char* argv[]) {
                 lex_error_count++;
             }
         }
-        struct parse_intermediates immed = parse(input->tokens);
+        if (lex_error_count > 0) continue;
+        struct parse_intermediates immed = parse(input->tokens, input->lines);
         input->parse_ctx = immed.ctx;
         input->root = immed.root;
         if (input->parse_ctx->parse_errors->entry_count > 0) {

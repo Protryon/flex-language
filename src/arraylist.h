@@ -33,4 +33,8 @@ size_t arraylist_add(struct arraylist* list, uint64_t value);
 
 size_t arraylist_addptr(struct arraylist* list, void* value);
 
+ssize_t arraylist_index(struct arraylist* list, uint64_t value);
+
+ssize_t arraylist_indexptr(struct arraylist* list, void* value);
+
 #endif

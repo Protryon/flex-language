@@ -246,7 +246,7 @@ struct ast_node* parse_expression(struct parse_ctx* ctx, struct token*** tokens,
 struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t csig, uint8_t can_variadic, uint8_t can_init, uint8_t can_semi);
 struct ast_node* parse_assignment_expression(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
 
-struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t can_variadic, uint8_t can_ptrarr, uint8_t can_generic) {
+struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t can_variadic, uint8_t can_ptrarr, uint8_t can_generic, uint8_t can_generic_generic) {
     INIT_PARSE_FUNC();
     ALLOC_NODE(AST_NODE_TYPE);
     START_NODE(node);
@@ -255,7 +255,7 @@ struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_
     if (can_generic && EAT(TOKEN_LT)) {
         node->data.type.generics = arraylist_new(1, sizeof(struct ast_node*));
         while (MATCH_TYPE()) {
-            struct ast_node* subtype = parse_type(ctx, tokens, token_count, 0, 1, 1);
+            struct ast_node* subtype = parse_type(ctx, tokens, token_count, 0, 1, can_generic_generic, can_generic_generic);
             CHECK_EXPR_AND(subtype, free_ast_node(node));
             arraylist_addptr(node->data.type.generics, subtype);
             if (!EAT(TOKEN_COMMA)) {
@@ -462,7 +462,7 @@ struct ast_node* parse_new_expression(struct parse_ctx* ctx, struct token*** tok
     ALLOC_NODE(AST_NODE_NEW);
     START_NODE(node);
     EXPECT_TOKEN(TOKEN_NEW, "new");
-    node->data.new.type = parse_type(ctx, tokens, token_count, 0, 1, 1);
+    node->data.new.type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
     CHECK_EXPR_AND(node->data.new.type, free_ast_node(node));
     END_NODE(node);
     return node;
@@ -768,7 +768,7 @@ struct ast_node* parse_unary_expression(struct parse_ctx* ctx, struct token*** t
             ALLOC_NODE_DUMMY(AST_NODE_CAST);
             STORE_TOKEN_STATE(state1);
             COPY_DUMMY_TO_REAL(node);
-            node->data.cast.type = parse_type(ctx, tokens, token_count, 0, 1, 1);
+            node->data.cast.type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
             if (node->data.cast.type == NULL || !EAT(TOKEN_RPAREN)) {
                 RESTORE_TOKEN_STATE(state1);
                 BACKTRACK();
@@ -1317,7 +1317,7 @@ struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, si
     node->data.vardecl.prot = prot;
     node->data.vardecl.synch = synch;
     node->data.vardecl.csig = csig;
-    node->data.vardecl.type = parse_type(ctx, tokens, token_count, can_variadic, 1, 1);
+    node->data.vardecl.type = parse_type(ctx, tokens, token_count, can_variadic, 1, 1, 1);
     CHECK_EXPR_AND(node->data.vardecl.type, free_ast_node(node));
     EXPECT_TOKEN(TOKEN_IDENTIFIER, "identifier");
     node->data.vardecl.name = ttok->value;
@@ -1355,7 +1355,7 @@ struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_
     node->data.func.virt = virt;
     node->data.func.async = async;
     node->data.func.csig = csig;
-    node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1);
+    node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
     CHECK_EXPR_AND(node->data.func.return_type, free_ast_node(node));
     struct token* name_token = EAT(TOKEN_IDENTIFIER);
     node->data.func.name = name_token == NULL ? NULL : name_token->value;
@@ -1394,7 +1394,7 @@ struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens
         } while (EAT(TOKEN_COMMA));
         EXPECT_TOKEN(TOKEN_GT, ">");
     }
-    node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1);
+    node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
     CHECK_EXPR_AND(node->data.func.return_type, free_ast_node(node));
     EXPECT_TOKEN(TOKEN_ARROW, "=>");
     node->data.func.body = parse_expression_maybe_semicolon(ctx, tokens, token_count);
@@ -1418,7 +1418,7 @@ struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size
     if (EAT(TOKEN_COLON)) {
         node->data.class.parents = arraylist_new(2, sizeof(struct ast_node*));
         do {
-            struct ast_node* type = parse_type(ctx, tokens, token_count, 0, 0, 1);
+            struct ast_node* type = parse_type(ctx, tokens, token_count, 0, 0, 1, 0);
             CHECK_EXPR_AND(type, free_ast_node(node));
             arraylist_addptr(node->data.class.parents, type);
         } while (EAT(TOKEN_COMMA));
@@ -1549,7 +1549,7 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
     return node;
 }
 
-struct ast_node* parse_file(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count) {
+struct ast_node* parse_file(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, struct arraylist* lines) {
     INIT_PARSE_FUNC();
     if (*token_count == 0) {
         struct parse_error* perr = smalloc(sizeof(struct parse_error));
@@ -1566,6 +1566,7 @@ struct ast_node* parse_file(struct parse_ctx* ctx, struct token*** tokens, size_
     START_NODE(node);
     node->data.file.body = scalloc(sizeof(struct ast_node));
     node->data.file.body->type = AST_NODE_BODY;
+    node->data.file.lines = lines;
     START_NODE(node->data.file.body);
     node->data.file.body->data.body.children = arraylist_new(4, sizeof(struct ast_node*));
     while (1) {
@@ -1589,13 +1590,13 @@ struct ast_node* parse_file(struct parse_ctx* ctx, struct token*** tokens, size_
     return node;
 }
 
-struct parse_intermediates parse(struct arraylist* tokens_list) {
+struct parse_intermediates parse(struct arraylist* tokens_list, struct arraylist* lines) {
     struct token** tokens = NULL;
     struct token** otokens = tokens;
     size_t token_count = arraylist_arrayify(tokens_list, &tokens);
     struct parse_ctx* ctx = scalloc(sizeof(struct parse_ctx));
     ctx->parse_errors = arraylist_new(16, sizeof(struct parse_error*));
-    struct parse_intermediates immed = (struct parse_intermediates) {ctx, parse_file(ctx, &tokens, &token_count)};
+    struct parse_intermediates immed = (struct parse_intermediates) {ctx, parse_file(ctx, &tokens, &token_count, lines)};
     if (otokens != NULL) free(otokens);
     return immed;
 }

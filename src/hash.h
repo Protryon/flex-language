@@ -5,14 +5,14 @@
 #include <unistd.h>
 
 struct hashmap_bucket_entry {
-    uint32_t umod_hash;
+    uint64_t umod_hash;
     char* key;
     void* data;
     struct hashmap_bucket_entry* next;
 };
 
 struct hashset_bucket_entry {
-    uint32_t umod_hash;
+    uint64_t umod_hash;
     char* key;
     struct hashset_bucket_entry* next;
 };
@@ -23,11 +23,19 @@ struct hashmap {
     struct hashmap_bucket_entry** buckets;
 };
 
+#define ITER_MAP(map) {for (size_t bucket_i = 0; bucket_i < map->bucket_count; bucket_i++) { for (struct hashmap_bucket_entry* bucket_entry = map->buckets[bucket_i]; bucket_entry != NULL; bucket_entry = bucket_entry->next) { char* str_key = bucket_entry->key; void* ptr_key = (void*)bucket_entry->umod_hash; void* value = bucket_entry->data;
+
+#define ITER_MAP_END() }}}
+
 struct hashset {
     size_t entry_count;
     size_t bucket_count;
     struct hashset_bucket_entry** buckets;
 };
+
+#define ITER_SET(set) {for (size_t bucket_i = 0; bucket_i < set->bucket_count; bucket_i++) { for (struct hashset_bucket_entry* bucket_entry = set->buckets[bucket_i]; bucket_entry != NULL; bucket_entry = bucket_entry->next) { char* str_key = bucket_entry->key; void* ptr_key = (void*)bucket_entry->umod_hash;
+
+#define ITER_SET_END() }}}
 
 struct hashmap* new_hashmap(size_t init_cap);
 
