@@ -6,6 +6,7 @@
 #include "xstring.h"
 #include <stdio.h>
 
+// 256 spaces
 const char* whitespace = "                                                                                                                                                                                                                                                                ";
 
 #define COMMA ,
@@ -120,10 +121,12 @@ struct prog_func* gen_prog_func_func(struct prog_state* state, struct ast_node* 
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
     fun->arguments = new_hashmap(4);
+    fun->node_map = new_hashmap(4);
     struct preprocess_ctx lctx = (struct preprocess_ctx) {state, func, NULL, NULL};
     for (size_t i = 0; i < func->data.func.arguments->entry_count; i++) {
         struct ast_node* arg = arraylist_getptr(func->data.func.arguments, i);
         struct prog_var* var = scalloc(sizeof(struct prog_var));
+        var->uid = state->next_var_id++;
         var->name = arg->data.vardecl.name;
         var->func = fun;
         var->prot = PROTECTION_PRIV;
@@ -178,7 +181,7 @@ struct ast_node* preprocess_expr(struct ast_node* node, struct preprocess_ctx* c
         } else if (ctx->module != NULL) {
             node->prog->data.func = gen_prog_mod_func(ctx->state, node, ctx->module);
         }
-    }// TODO: variables
+    }
     return node;
 }
 
@@ -194,10 +197,12 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct ast_node* 
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
     fun->arguments = new_hashmap(4);
+    fun->node_map = new_hashmap(4);
     struct preprocess_ctx lctx = (struct preprocess_ctx) {state, func, NULL, NULL};
     for (size_t i = 0; i < func->data.func.arguments->entry_count; i++) {
         struct ast_node* arg = arraylist_getptr(func->data.func.arguments, i);
         struct prog_var* var = scalloc(sizeof(struct prog_var));
+        var->uid = state->next_var_id++;
         var->name = arg->data.vardecl.name;
         var->func = fun;
         var->prot = PROTECTION_PRIV;
@@ -225,6 +230,7 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct ast_node* 
 
 void gen_prog_clas_var(struct prog_state* state, struct ast_node* vard, struct prog_class* parent) {
     struct prog_var* var = scalloc(sizeof(struct prog_var));
+    var->uid = state->next_var_id++;
     var->name = vard->data.vardecl.name;
     var->clas = parent;
     var->prot = parent->prot == PROTECTION_NONE || parent->prot >= vard->data.vardecl.prot ? vard->data.vardecl.prot : parent->prot;
@@ -256,6 +262,7 @@ void gen_prog_class(struct prog_state* state, struct ast_node* clas, struct prog
     cl->iface = clas->data.class.iface;
     cl->module = parent;
     cl->vars = new_hashmap(4);
+    cl->node_map = new_hashmap(4);
     cl->parents = arraylist_new(clas->data.class.parents->entry_count, sizeof(struct ast_node*));
     cl->funcs = new_hashmap(4);
     hashmap_put(parent->classes, cl->name, cl);
@@ -286,10 +293,12 @@ struct prog_func* gen_prog_mod_func(struct prog_state* state, struct ast_node* f
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
     fun->arguments = new_hashmap(4);
+    fun->node_map = new_hashmap(4);
     struct preprocess_ctx lctx = (struct preprocess_ctx) {state, fun, NULL, NULL};
     for (size_t i = 0; i < func->data.func.arguments->entry_count; i++) {
         struct ast_node* arg = arraylist_getptr(func->data.func.arguments, i);
         struct prog_var* var = scalloc(sizeof(struct prog_var));
+        var->uid = state->next_var_id++;
         var->name = arg->data.vardecl.name;
         var->func = fun;
         var->prot = PROTECTION_PRIV;
@@ -317,6 +326,7 @@ struct prog_func* gen_prog_mod_func(struct prog_state* state, struct ast_node* f
 
 void gen_prog_mod_var(struct prog_state* state, struct ast_node* vard, struct prog_module* parent) {
     struct prog_var* var = scalloc(sizeof(struct prog_var));
+    var->uid = state->next_var_id++;
     var->name = vard->data.vardecl.name;
     var->module = parent;
     var->prot = parent->prot == PROTECTION_NONE || parent->prot >= vard->data.vardecl.prot ? vard->data.vardecl.prot : parent->prot;
@@ -342,6 +352,7 @@ void gen_prog_module(struct prog_state* state, struct prog_file* file, struct as
     mod->file = file;
     mod->submodules = new_hashmap(4);
     mod->vars = new_hashmap(4);
+    mod->node_map = new_hashmap(4);
     mod->classes = new_hashmap(4);
     mod->funcs = new_hashmap(4);
     mod->types = new_hashmap(16);
@@ -482,13 +493,13 @@ void propagate_mod_types(struct prog_state* state, struct prog_module* mod) {
         ITER_MAP(clas->vars) {
             struct prog_var* var = value;
             provide_master_types(state, NULL, clas, NULL, var->type, 0);
-            ITER_MAP(var->node_map) {
-                struct ast_node* t_node = ptr_key;
-                struct prog_node* p_node = value;
-                if (p_node->prog_type == PROG_NODE_TYPE) {
-                    provide_master_types(state, NULL, clas, NULL, p_node->data.type, 0);
-                }
-            ITER_MAP_END()}
+        ITER_MAP_END()}
+        ITER_MAP(clas->node_map) {
+            struct ast_node* t_node = ptr_key;
+            struct prog_node* p_node = value;
+            if (p_node->prog_type == PROG_NODE_TYPE) {
+                provide_master_types(state, NULL, clas, NULL, p_node->data.type, 0);
+            }
         ITER_MAP_END()}
         ITER_MAP(clas->funcs) {
             struct prog_func* func = value;
@@ -505,16 +516,16 @@ void propagate_mod_types(struct prog_state* state, struct prog_module* mod) {
             ITER_MAP_END()}
         ITER_MAP_END()}
     ITER_MAP_END()}
+    ITER_MAP(mod->node_map) {
+        struct ast_node* t_node = ptr_key;
+        struct prog_node* p_node = value;
+        if (p_node->prog_type == PROG_NODE_TYPE) {
+            provide_master_types(state, mod, NULL, NULL, p_node->data.type, 0);
+        }
+    ITER_MAP_END()}
     ITER_MAP(mod->vars) {
         struct prog_var* var = value;
         provide_master_types(state, mod, NULL, NULL, var->type, 0);
-        ITER_MAP(var->node_map) {
-            struct ast_node* t_node = ptr_key;
-            struct prog_node* p_node = value;
-            if (p_node->prog_type == PROG_NODE_TYPE) {
-                provide_master_types(state, mod, NULL, NULL, p_node->data.type, 0);
-            }
-        ITER_MAP_END()}
     ITER_MAP_END()}
     ITER_MAP(mod->funcs) {
         struct prog_func* func = value;
@@ -533,6 +544,217 @@ void propagate_mod_types(struct prog_state* state, struct prog_module* mod) {
     ITER_MAP(mod->submodules) {
         propagate_mod_types(state, value);
     ITER_MAP_END()}
+}
+
+struct prog_scope {
+    struct prog_scope* parent;
+    struct arraylist* children;
+    struct hashmap* vars;
+    uint8_t copied_ref;
+    struct ast_node* ast_node;
+    uint8_t ascending_makes_closure;
+    uint8_t exit_expr_scope;
+    uint8_t is_param_level;
+    uint8_t is_class_level;
+};
+
+#define ALLOC_REF_SCOPE(name, node, ref) struct prog_scope* name = scalloc(sizeof(struct prog_scope)); name->copied_ref = 1; name->vars = ref; name->parent = stack; name->children = arraylist_new(4, sizeof(struct prog_scope*)); name->ast_node = node; arraylist_addptr(scope->children, name);
+#define ALLOC_SCOPE_PARENT(name, stack, node) struct prog_scope* name = scalloc(sizeof(struct prog_scope)); name->copied_ref = 0; name->vars = new_hashmap(8); name->parent = stack; name->children = arraylist_new(4, sizeof(struct prog_scope*)); name->ast_node = node; arraylist_addptr(scope->children, name);
+#define ALLOC_SCOPE(name, node) ALLOC_SCOPE_PARENT(name, stack, node)
+
+
+#define TRAVERSE_NEW_FUNC(item) (item)->type == AST_NODE_FUNC ? (item) : nearest_func
+#define TRAVERSE(item) scope_analysis_expr(state, item, TRAVERSE_NEW_FUNC(item), NULL, NULL, stack);
+#define TRAVERSE_SCOPED(item) if (item != NULL) { ALLOC_SCOPE(scope, item); scope_analysis_expr(state, item, TRAVERSE_NEW_FUNC(item), NULL, NULL, scope); }
+#define TRAVERSE_PRESCOPED_SPEC(item, scope) if (item != NULL) { scope_analysis_expr(state, item, TRAVERSE_NEW_FUNC(item), NULL, NULL, scope); }
+#define TRAVERSE_PRESCOPED(item) TRAVERSE_PRESCOPED_SPEC(item, scope)
+#define TRAVERSE_ARRAYLIST(list) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); scope_analysis_expr(state, item, TRAVERSE_NEW_FUNC(item), NULL, NULL, stack); } }
+#define TRAVERSE_ARRAYLIST_SCOPED(list) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); if (item != NULL) { ALLOC_SCOPE(scope, item); scope_analysis_expr(state, item, TRAVERSE_NEW_FUNC(item), NULL, NULL, scope); } } }
+#define TRAVERSE_ARRAYLIST_PRESCOPED(list) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); if (item != NULL) { scope_analysis_expr(state, item, TRAVERSE_NEW_FUNC(item), NULL, NULL, scope); } } }
+
+void scope_analysis_expr(struct prog_state* state, struct ast_node* root, struct ast_node* nearest_func, struct prog_module* mod, struct prog_class* clas, struct prog_scope* stack) {
+    if (root == NULL) return NULL;
+    switch (root->type) {
+        case AST_NODE_BINARY:
+        if (root->data.binary.op == BINARY_OP_LAND || root->data.binary.op == BINARY_OP_LOR) {
+            TRAVERSE_SCOPED(root->data.binary.left);
+            TRAVERSE_SCOPED(root->data.binary.right);
+        } else {
+            TRAVERSE(root->data.binary.left);
+            TRAVERSE(root->data.binary.right);
+        }
+        break;
+        case AST_NODE_BODY:
+        TRAVERSE_ARRAYLIST_SCOPED(root->data.body.children);
+        break;
+        case AST_NODE_CALC_MEMBER:
+        TRAVERSE_SCOPED(root->data.calc_member.parent);
+        TRAVERSE_SCOPED(root->data.calc_member.calc);
+        break;
+        case AST_NODE_CALL:
+        TRAVERSE_SCOPED(root->data.call.func);
+        TRAVERSE_ARRAYLIST_SCOPED(root->data.call.parameters);
+        break;
+        case AST_NODE_CASE:
+        TRAVERSE(root->data._case.value);
+        TRAVERSE(root->data._case.expr);
+        break;
+        case AST_NODE_CAST:
+        TRAVERSE(root->data.cast.type);
+        TRAVERSE(root->data.cast.expr);
+        break;
+        case AST_NODE_DEFAULT_CASE:
+        TRAVERSE(root->data.default_case.expr);
+        break;
+        case AST_NODE_FOR:
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE_PRESCOPED(root->data._for.init);
+        TRAVERSE_PRESCOPED(root->data._for.loop);
+        TRAVERSE_PRESCOPED(root->data._for.final);
+        TRAVERSE_PRESCOPED(root->data._for.expr);
+        break;
+        case AST_NODE_FOR_EACH:
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE_PRESCOPED(root->data.for_each.init);
+        TRAVERSE_PRESCOPED(root->data.for_each.loop);
+        TRAVERSE_PRESCOPED(root->data.for_each.expr);
+        break;
+        case AST_NODE_FUNC:
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE(root->data.func.return_type);
+        TRAVERSE_ARRAYLIST_PRESCOPED(root->data.func.arguments);
+        TRAVERSE_PRESCOPED(root->data.func.body);
+        break;
+        case AST_NODE_IF:
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE_PRESCOPED(root->data._if.condition);
+        ALLOC_SCOPE_PARENT(scopeExpr, scope, root);
+        TRAVERSE_PRESCOPED_SPEC(root->data._if.expr, scopeExpr);
+        if (root->data._if.elseExpr != NULL) {
+            ALLOC_SCOPE_PARENT(scopeElseExpr, scope, root);
+            TRAVERSE(root->data._if.elseExpr);
+        }
+        break;
+        case AST_NODE_RET:
+        TRAVERSE_SCOPED(root->data.ret.expr);
+        break;
+        case AST_NODE_SWITCH:
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE_PRESCOPED(root->data._switch.switch_on);
+        TRAVERSE_ARRAYLIST_PRESCOPED(root->data._switch.cases);
+        break;
+        case AST_NODE_TERNARY:
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE_PRESCOPED(root->data.ternary.condition);
+        ALLOC_SCOPE_PARENT(scopeTrue, scope, root);
+        TRAVERSE_PRESCOPED_SPEC(root->data.ternary.if_true, scopeTrue);
+        ALLOC_SCOPE_PARENT(scopeFalse, scope, root);
+        TRAVERSE_PRESCOPED_SPEC(root->data.ternary.if_false, scopeFalse);
+        break;
+        case AST_NODE_THROW:
+        TRAVERSE_SCOPED(root->data.throw.what);
+        break;
+        case AST_NODE_TRY:
+        TRAVERSE_SCOPED(root->data.try.expr);
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE_PRESCOPED(root->data.try.catch_var_decl);
+        TRAVERSE_PRESCOPED(root->data.try.catch_expr);
+        TRAVERSE_SCOPED(root->data.try.finally_expr);
+        break;
+        case AST_NODE_UNARY:
+        TRAVERSE(root->data.unary.child);
+        break;
+        case AST_NODE_UNARY_POSTFIX:
+        TRAVERSE(root->data.unary_postfix.child);
+        break;
+        case AST_NODE_VAR_DECL:
+        TRAVERSE_SCOPED(root->data.vardecl.init);
+        TRAVERSE_ARRAYLIST_SCOPED(root->data.vardecl.cons_init);
+        if (hashmap_get(stack->vars, root->data.vardecl.name)) {
+            //TODO: error
+        } else {
+            struct prog_var* var = scalloc(sizeof(struct prog_var));
+            var->func = nearest_func == NULL ? NULL : nearest_func->prog->data.func;
+            var->module = mod;
+            var->clas = clas;
+            var->name = root->data.vardecl.name;
+            var->proc.init = root->data.vardecl.init;
+            var->proc.cons_init = root->data.vardecl.cons_init;
+            var->prot = PROTECTION_PRIV;
+            var->type = root->data.vardecl.type->prog->data.type;
+            var->uid = state->next_var_id++;
+            hashmap_put(stack->vars, root->data.vardecl.name, var);
+        }
+        break;
+        case AST_NODE_WHILE:
+        ALLOC_SCOPE(scope, root);
+        TRAVERSE_PRESCOPED(root->data._while.loop);
+        TRAVERSEE_PRESCOPED(root->data._while.expr);
+        break;
+        case AST_NODE_IMP_NEW:
+        TRAVERSE_ARRAYLIST(root->data.imp_new.parameters);
+        break;
+        case AST_NODE_IDENTIFIER:
+
+    }
+}
+
+void scope_analysis_func(struct prog_state* state, struct prog_func* func, struct prog_scope* stack) {
+
+}
+
+void scope_analysis_class(struct prog_state* state, struct prog_module* clas, struct prog_scope* stack) {
+    ITER_MAP(clas->funcs) {
+        ALLOC_SCOPE(scope, value);
+        scope_analysis_func(state, value, scope);
+    ITER_MAP_END()}
+    ITER_MAP(clas->vars) {
+        struct prog_var* var = value;
+        if (var->proc.init != NULL) {
+            ALLOC_SCOPE(scope, var->proc.init);
+            scope_analysis_expr(state, var->proc.init, NULL, NULL, clas, scope);
+        } else if (var->proc.cons_init) {
+            for (size_t i = 0; i < var->proc.cons_init; i++) {
+                struct ast_node* cons = arraylist_getptr(var->proc.cons_init, i);
+                ALLOC_SCOPE(scope, cons);
+                scope_analysis_expr(state, var->proc.init, NULL, NULL, clas, scope);
+            }
+        }
+    ITER_MAP_END()}
+}
+
+struct prog_scope* scope_analysis_mod(struct prog_state* state, struct prog_module* mod, struct prog_scope* stack) {
+    if (stack == NULL) {
+        stack = scalloc(sizeof(struct prog_scope));
+        stack->vars = mod->vars;
+        stack->copied_ref = 1;
+    }
+    ITER_MAP(mod->classes) {
+        ALLOC_REF_SCOPE(scope, value, ((struct prog_class*)value)->vars);
+        scope_analysis_class(state, value, scope);
+    ITER_MAP_END()}
+    ITER_MAP(mod->funcs) {
+        ALLOC_SCOPE(scope, value);
+        scope_analysis_func(state, value, scope);
+    ITER_MAP_END()}
+    ITER_MAP(mod->vars) {
+        struct prog_var* var = value;
+        if (var->proc.init != NULL) {
+            ALLOC_SCOPE(scope, var->proc.init);
+            scope_analysis_expr(state, var->proc.init, NULL, mod, NULL, scope);
+        } else if (var->proc.cons_init) {
+            for (size_t i = 0; i < var->proc.cons_init; i++) {
+                struct ast_node* cons = arraylist_getptr(var->proc.cons_init, i);
+                ALLOC_SCOPE(scope, cons);
+                scope_analysis_expr(state, var->proc.init, NULL, mod, NULL, scope);
+            }
+        }
+    ITER_MAP_END()}
+    ITER_MAP(mod->submodules) {
+        ALLOC_REF_SCOPE(scope, value, ((struct prog_module*)value)->vars);
+        scope_analysis_mod(state, value, scope);
+    ITER_MAP_END()}
+    return stack;
 }
 
 struct prog_state* gen_prog(struct arraylist* files) {
@@ -561,11 +783,13 @@ struct prog_state* gen_prog(struct arraylist* files) {
 
     /*
     plan:
-    variable tagging
+    scope analysis & variable tagging
+    type inference & type expr propagation
+    implcit cast insertion?
     generic duplication/mutation
     color all function/(class/global variable) combos: externally mutable, externally accessible, mutable, accessable
     color reference entry/exit to functions
-    generate export headers if requesested
+    generate export headers if requested
 
     context checking/error reporting
 

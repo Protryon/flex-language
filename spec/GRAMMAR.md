@@ -326,6 +326,7 @@ Defined keywords:
 ### Indexable Operations
 * All Iterable functions
 * `copy`
+* `chunk`
 * `fill`
 * `slice`
 * `qsort`

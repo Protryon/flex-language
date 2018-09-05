@@ -377,6 +377,7 @@ struct parse_error {
 
 struct parse_ctx {
     struct arraylist* parse_errors;
+    uint8_t sequence_disabled;
 };
 
 struct parse_intermediates {

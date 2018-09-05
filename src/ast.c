@@ -91,8 +91,8 @@ struct ast_node* traverse_node(struct ast_node* root, struct ast_node* (traverse
         TRAVERSE_ARRAYLIST(root->data.body.children);
         break;
         case AST_NODE_CALC_MEMBER:
-        TRAVERSE(root->data.calc_member.calc);
         TRAVERSE(root->data.calc_member.parent);
+        TRAVERSE(root->data.calc_member.calc);
         break;
         case AST_NODE_CALL:
         TRAVERSE(root->data.call.func);
@@ -244,7 +244,6 @@ struct ast_node* parse_identifier(struct parse_ctx* ctx, struct token*** tokens,
 struct ast_node* parse_expression_maybe_semicolon(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
 struct ast_node* parse_expression(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
 struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t csig, uint8_t can_variadic, uint8_t can_init, uint8_t can_semi);
-struct ast_node* parse_assignment_expression(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
 
 struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t can_variadic, uint8_t can_ptrarr, uint8_t can_generic, uint8_t can_generic_generic) {
     INIT_PARSE_FUNC();
@@ -291,12 +290,15 @@ struct ast_node* parse_body(struct parse_ctx* ctx, struct token*** tokens, size_
     START_NODE(node);
     EXPECT_TOKEN(TOKEN_LCURLY, "{");
     if (!MATCH(TOKEN_RCURLY)) {
+        uint8_t sequence_disabled = ctx->sequence_disabled;
+        ctx->sequence_disabled = 0;
         node->data.body.children = arraylist_new(4, sizeof(struct ast_node*));
         while (!MATCH(TOKEN_RCURLY) && *token_count > 0) {
             struct ast_node* child = parse_expression_maybe_semicolon(ctx, tokens, token_count);
-            CHECK_EXPR_AND(child, free_ast_node(node));
+            CHECK_EXPR_AND(child, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
             arraylist_addptr(node->data.body.children, child);
         }
+        ctx->sequence_disabled = sequence_disabled;
     }
     EXPECT_TOKEN(TOKEN_RCURLY, "}");
     END_NODE(node);
@@ -328,16 +330,19 @@ struct ast_node* parse_for_expression(struct parse_ctx* ctx, struct token*** tok
     START_DUMMY_NODE();
     EXPECT_TOKEN(TOKEN_FOR, "for");
     EXPECT_TOKEN(TOKEN_LPAREN, "(");
+    uint8_t sequence_disabled = ctx->sequence_disabled;
+    ctx->sequence_disabled = 0;
     struct ast_node* init = parse_expression(ctx, tokens, token_count);
-    CHECK_EXPR(init);
+    CHECK_EXPR_AND(init, ctx->sequence_disabled = sequence_disabled);
     if (MATCH(TOKEN_COLON)) {
         ALLOC_NODE_DUMMY(AST_NODE_FOR_EACH);
         COPY_DUMMY_TO_REAL(node);
         node->data.for_each.init = init;
         EAT(TOKEN_COLON);
         node->data.for_each.loop = parse_expression(ctx, tokens, token_count);
-        CHECK_EXPR_AND(node->data.for_each.loop, free_ast_node(node));
+        CHECK_EXPR_AND(node->data.for_each.loop, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
         EXPECT_TOKEN(TOKEN_RPAREN, ")");
+        ctx->sequence_disabled = sequence_disabled;
         node->data.for_each.expr = parse_expression_maybe_semicolon(ctx, tokens, token_count);
         CHECK_EXPR_AND(node->data.for_each.expr, free_ast_node(node));
         END_NODE(node);
@@ -347,11 +352,12 @@ struct ast_node* parse_for_expression(struct parse_ctx* ctx, struct token*** tok
         node->data._for.init = init;
         EXPECT_TOKEN(TOKEN_SEMICOLON, ";");
         node->data._for.loop = parse_expression(ctx, tokens, token_count);
-        CHECK_EXPR_AND(node->data._for.loop, free_ast_node(node));
+        CHECK_EXPR_AND(node->data._for.loop, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
         EXPECT_TOKEN(TOKEN_SEMICOLON, ";");
         node->data._for.final = parse_expression(ctx, tokens, token_count);
-        CHECK_EXPR_AND(node->data._for.final, free_ast_node(node));
+        CHECK_EXPR_AND(node->data._for.final, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
         EXPECT_TOKEN(TOKEN_RPAREN, ")");
+        ctx->sequence_disabled = sequence_disabled;
         node->data._for.expr = parse_expression_maybe_semicolon(ctx, tokens, token_count);
         CHECK_EXPR_AND(node->data._for.expr, free_ast_node(node));
         END_NODE(node);
@@ -365,7 +371,10 @@ struct ast_node* parse_while_expression(struct parse_ctx* ctx, struct token*** t
     START_NODE(node);
     EXPECT_TOKEN(TOKEN_WHILE, "while");
     EXPECT_TOKEN(TOKEN_LPAREN, "(");
+    uint8_t sequence_disabled = ctx->sequence_disabled;
+    ctx->sequence_disabled = 0;
     node->data._while.loop = parse_expression(ctx, tokens, token_count);
+    ctx->sequence_disabled = sequence_disabled;
     CHECK_EXPR_AND(node->data._while.loop, free_ast_node(node));
     EXPECT_TOKEN(TOKEN_RPAREN, ")");
     node->data._while.expr = parse_expression_maybe_semicolon(ctx, tokens, token_count);
@@ -404,10 +413,12 @@ struct ast_node* parse_switch_expression(struct parse_ctx* ctx, struct token*** 
     INIT_PARSE_FUNC();
     ALLOC_NODE(AST_NODE_SWITCH);
     START_NODE(node);
+    uint8_t sequence_disabled = ctx->sequence_disabled;
+    ctx->sequence_disabled = 0;
     EXPECT_TOKEN(TOKEN_SWITCH, "switch");
     EXPECT_TOKEN(TOKEN_LPAREN, "(");
     node->data._switch.switch_on = parse_expression(ctx, tokens, token_count);
-    CHECK_EXPR_AND(node->data._switch.switch_on, free_ast_node(node));
+    CHECK_EXPR_AND(node->data._switch.switch_on, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
     EXPECT_TOKEN(TOKEN_RPAREN, ")");
     EXPECT_TOKEN(TOKEN_LCURLY, "{");
     node->data._switch.cases = arraylist_new(8, sizeof(struct ast_node*));
@@ -416,16 +427,17 @@ struct ast_node* parse_switch_expression(struct parse_ctx* ctx, struct token*** 
         if (!has_default && MATCH(TOKEN_DEFAULT)) {
             has_default = 1;
             struct ast_node* def = parse_switch_default_case(ctx, tokens, token_count);
-            CHECK_EXPR_AND(def, free_ast_node(node));
+            CHECK_EXPR_AND(def, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
             arraylist_addptr(node->data._switch.cases, def);
         } else {
             struct ast_node* cas = parse_switch_case(ctx, tokens, token_count);
-            CHECK_EXPR_AND(cas, free_ast_node(node));
+            CHECK_EXPR_AND(cas, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
             arraylist_addptr(node->data._switch.cases, cas);
         }
     }
     EXPECT_TOKEN(TOKEN_RCURLY, "}");
     END_NODE(node);
+    ctx->sequence_disabled = sequence_disabled;
     return node;
 }
 
@@ -434,17 +446,21 @@ struct ast_node* parse_try_expression(struct parse_ctx* ctx, struct token*** tok
     ALLOC_NODE(AST_NODE_TRY);
     START_NODE(node);
     EXPECT_TOKEN(TOKEN_TRY, "try");
+    uint8_t sequence_disabled = ctx->sequence_disabled;
+    ctx->sequence_disabled = 0;
     node->data.try.expr = parse_expression_maybe_semicolon(ctx, tokens, token_count);
-    CHECK_EXPR_AND(node->data.try.expr, free_ast_node(node));
+    CHECK_EXPR_AND(node->data.try.expr, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
     if (MATCH(TOKEN_CATCH)) {
         EAT(TOKEN_CATCH);
         EXPECT_TOKEN(TOKEN_LPAREN, "(");
         node->data.try.catch_var_decl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 0, 0);
-        CHECK_EXPR_AND(node->data.try.catch_var_decl, free_ast_node(node));
+        CHECK_EXPR_AND(node->data.try.catch_var_decl, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
         EXPECT_TOKEN(TOKEN_RPAREN, ")");
+        ctx->sequence_disabled = sequence_disabled;
         node->data.try.catch_expr = parse_expression_maybe_semicolon(ctx, tokens, token_count);
         CHECK_EXPR_AND(node->data.try.catch_expr, free_ast_node(node));
     } else {
+        ctx->sequence_disabled = sequence_disabled;
         EXPECT_TOKEN(TOKEN_FINALLY, "finally");
         goto finally;
     }
@@ -497,11 +513,14 @@ struct ast_node* parse_primary_expression(struct parse_ctx* ctx, struct token***
         EXPECT_TOKEN(TOKEN_LBRACK, "[");
         if (!MATCH(TOKEN_RBRACK)) {
             node->data.imp_new.parameters = arraylist_new(4, sizeof(struct ast_node*));
+            uint8_t sequence_disabled = ctx->sequence_disabled;
             do {
-                struct ast_node* child = parse_assignment_expression(ctx, tokens, token_count);
-                CHECK_EXPR_AND(child, free_ast_node(node));
+                ctx->sequence_disabled = 1;
+                struct ast_node* child = parse_expression(ctx, tokens, token_count);
+                CHECK_EXPR_AND(child, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
                 arraylist_addptr(node->data.imp_new.parameters, child);
             } while (EAT(TOKEN_COMMA));
+            ctx->sequence_disabled = sequence_disabled;
         }
         EXPECT_TOKEN(TOKEN_RBRACK, "]");
         END_NODE(node);
@@ -517,7 +536,7 @@ struct ast_node* parse_primary_expression(struct parse_ctx* ctx, struct token***
         ALLOC_NODE_DUMMY(AST_NODE_GOTO);
         START_NODE(node);
         EAT(TOKEN_GOTO);
-        node->data._goto.expr = parse_expression(ctx, tokens, token_count);
+        node->data._goto.expr = parse_identifier(ctx, tokens, token_count);
         END_NODE(node);
         return node;
         case TOKEN_RET:
@@ -553,7 +572,10 @@ struct ast_node* parse_primary_expression(struct parse_ctx* ctx, struct token***
         return parse_func(ctx, tokens, token_count, PROTECTION_PRIV, synch, 0, async, 0);
         case TOKEN_LPAREN:
         EXPECT_TOKEN(TOKEN_LPAREN, "(");
+        uint8_t sequence_disabled = ctx->sequence_disabled;
+        ctx->sequence_disabled = 0;
         struct ast_node* ret = parse_expression(ctx, tokens, token_count);
+        ctx->sequence_disabled = sequence_disabled;
         EXPECT_TOKEN(TOKEN_RPAREN, ")");
         return ret;
         case TOKEN_NUMERIC_LIT:
@@ -644,11 +666,14 @@ struct ast_node* parse_postfix_unary_expression(struct parse_ctx* ctx, struct to
             node->data.call.func = base;
             if (!MATCH(TOKEN_RPAREN)) {
                 node->data.call.parameters = arraylist_new(4, sizeof(struct ast_node*));
+                uint8_t sequence_disabled = ctx->sequence_disabled;
                 do {
-                    struct ast_node* child = parse_assignment_expression(ctx, tokens, token_count);
-                    CHECK_EXPR_AND(child, free_ast_node(node));
+                    ctx->sequence_disabled = 1;
+                    struct ast_node* child = parse_expression(ctx, tokens, token_count);
+                    CHECK_EXPR_AND(child, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
                     arraylist_addptr(node->data.call.parameters, child);
                 } while (EAT(TOKEN_COMMA));
+                ctx->sequence_disabled = sequence_disabled;
             }
             EXPECT_TOKEN(TOKEN_RPAREN, ")");
             END_NODE(node);
@@ -657,7 +682,10 @@ struct ast_node* parse_postfix_unary_expression(struct parse_ctx* ctx, struct to
             ALLOC_NODE_DUMMY(AST_NODE_CALC_MEMBER);
             COPY_DUMMY_TO_REAL(node);
             node->data.calc_member.parent = base;
+            uint8_t sequence_disabled = ctx->sequence_disabled;
+            ctx->sequence_disabled = 0;
             node->data.calc_member.calc = parse_expression(ctx, tokens, token_count);
+            ctx->sequence_disabled = sequence_disabled;
             EXPECT_TOKEN(TOKEN_RBRACK, "]");
             END_NODE(node);
             base = node;
@@ -1220,7 +1248,10 @@ struct ast_node* parse_ternary_expression(struct parse_ctx* ctx, struct token***
         ALLOC_NODE_DUMMY(AST_NODE_TERNARY);
         COPY_DUMMY_TO_REAL(node);
         node->data.ternary.condition = base;
+        uint8_t sequence_disabled = ctx->sequence_disabled;
+        ctx->sequence_disabled = 0;
         node->data.ternary.if_true = parse_expression(ctx, tokens, token_count);
+        ctx->sequence_disabled = sequence_disabled;
         CHECK_EXPR_AND(node->data.ternary.if_true, free_ast_node(base));
         EXPECT_TOKEN(TOKEN_COLON, ":");
         node->data.ternary.if_false = parse_expression(ctx, tokens, token_count);
@@ -1275,10 +1306,14 @@ struct ast_node* parse_assignment_expression(struct parse_ctx* ctx, struct token
 struct ast_node* parse_sequence_expression(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count) {
     INIT_PARSE_FUNC();
     DUMMY_NODE();
+    uint8_t sequence_disabled = ctx->sequence_disabled;
     if (*token_count == 0) PARSE_ERROR_UNEXPECTED_TOKEN(EOF_ERROR_TOKEN, "expression");
     START_DUMMY_NODE();
     struct ast_node* base = parse_assignment_expression(ctx, tokens, token_count);
     CHECK_EXPR(base);
+    if (sequence_disabled) {
+        return base;
+    }
     while (EAT(TOKEN_COMMA)) {
         ALLOC_NODE_DUMMY(AST_NODE_BINARY);
         COPY_DUMMY_TO_REAL(node);
@@ -1328,11 +1363,14 @@ struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, si
         } else if (EAT(TOKEN_LPAREN)) {
             if (!EAT(TOKEN_RPAREN)) {
                 node->data.vardecl.cons_init = arraylist_new(4, sizeof(struct ast_node*));
+                uint8_t sequence_disabled = ctx->sequence_disabled;
                 do {
-                    struct ast_node* nodex = parse_assignment_expression(ctx, tokens, token_count);
-                    CHECK_EXPR_AND(nodex, free_ast_node(node));
+                    ctx->sequence_disabled = 1;
+                    struct ast_node* nodex = parse_expression(ctx, tokens, token_count);
+                    CHECK_EXPR_AND(nodex, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
                     arraylist_add(node->data.vardecl.cons_init, nodex);
-                } while(EAT(TOKEN_COMMA));
+                } while (EAT(TOKEN_COMMA));
+                ctx->sequence_disabled = sequence_disabled;
                 EXPECT_TOKEN(TOKEN_RPAREN, ")");
             }
             node->data.vardecl.cons_init = arraylist_new(1, sizeof(struct ast_node*));
@@ -1362,11 +1400,14 @@ struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_
     EXPECT_TOKEN(TOKEN_LPAREN, "(");
     if (!EAT(TOKEN_RPAREN)) {
         node->data.func.arguments = arraylist_new(4, sizeof(struct ast_node*));
+        uint8_t sequence_disabled = ctx->sequence_disabled;
         do {
+            ctx->sequence_disabled = 1;
             struct ast_node* vardecl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 1, 1, 0);
-            CHECK_EXPR_AND(vardecl, free_ast_node(node));
+            CHECK_EXPR_AND(vardecl, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
             arraylist_addptr(node->data.func.arguments, vardecl);
         } while (EAT(TOKEN_COMMA));
+        ctx->sequence_disabled = sequence_disabled = sequence_disabled;
         EXPECT_TOKEN(TOKEN_RPAREN, ")");
     }
     node->data.func.body = parse_expression_maybe_semicolon(ctx, tokens, token_count);
@@ -1387,11 +1428,14 @@ struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens
     EXPECT_TOKEN(TOKEN_LT, "<");
     if (!EAT(TOKEN_GT)) {
         node->data.func.arguments = arraylist_new(4, sizeof(struct ast_node*));
+        uint8_t sequence_disabled = ctx->sequence_disabled;
         do {
+            ctx->sequence_disabled = 1;
             struct ast_node* vardecl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 1, 1, 0);
-            CHECK_EXPR_AND(vardecl, free_ast_node(node));
+            CHECK_EXPR_AND(vardecl, free_ast_node(node); ctx->sequence_disabled = sequence_disabled);
             arraylist_addptr(node->data.func.arguments, vardecl);
         } while (EAT(TOKEN_COMMA));
+        ctx->sequence_disabled = sequence_disabled;
         EXPECT_TOKEN(TOKEN_GT, ">");
     }
     if (MATCH_TYPE()) {
@@ -1415,7 +1459,6 @@ struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size
     node->data.class.virt = virt;
     node->data.class.iface = iface;
     EXPECT_TOKEN(TOKEN_CLASS, "class");
-    
     node->data.class.name = ttok->value;
     if (EAT(TOKEN_COLON)) {
         node->data.class.parents = arraylist_new(2, sizeof(struct ast_node*));

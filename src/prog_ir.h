@@ -20,7 +20,7 @@ struct prog_module {
     struct hashmap* funcs;
     struct hashmap* vars;
     struct hashmap* types;
-    struct hsahmap* node_map;
+    struct hashmap* node_map;
     struct arraylist* imported_modules;
 };
 
@@ -70,6 +70,7 @@ struct prog_func {
     struct prog_class* clas; // VScode thinks class is a keyword in C...
     struct prog_func* closing;
     char* name;
+    uint64_t uid;
     uint8_t anonymous;
     uint8_t prot;
     uint8_t synch;
@@ -90,13 +91,11 @@ struct prog_var { // only interfunc vars
     struct prog_class* clas; // VScode thinks class is a keyword in C...
     struct prog_func* func;
     char* name;
+    uint64_t uid;
     uint8_t prot;
     uint8_t synch;
-    uint8_t virt;
-    uint8_t async;
     uint8_t csig;
     struct prog_type* type;
-    struct hashmap* node_map;
     struct {
         struct ast_node* init;
         struct arraylist* cons_init;
@@ -166,6 +165,7 @@ struct prog_state {
     struct hashmap* extracted_funcs; // all program funcs
     struct arraylist* errors;
     struct hashmap* node_map;
+    uint64_t next_var_id;
 };
 
 #endif
