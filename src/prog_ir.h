@@ -95,16 +95,19 @@ struct prog_var { // only interfunc vars
     uint8_t prot;
     uint8_t synch;
     uint8_t csig;
+    uint8_t is_const;
     struct prog_type* type;
     struct {
         struct ast_node* init;
         struct arraylist* cons_init;
     } proc;
+    struct prog_func* pre_alloc_func;
 };
 
 #define PROG_TYPE_UNKNOWN 0
 #define PROG_TYPE_PRIMITIVE 1
 #define PROG_TYPE_CLASS 2
+#define PROG_TYPE_FUNC 3
 
 enum prim_type {
     PRIM_V,
@@ -156,6 +159,10 @@ struct prog_type {
         struct {
             uint8_t prim_type;
         } prim;
+        struct {
+            struct prog_type* return_type;
+            struct arraylist* arg_types;
+        } func;
     } data;
 };
 

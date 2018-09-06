@@ -447,6 +447,9 @@ void tokenize(char* source, size_t src_len, struct arraylist* tokens) {
                 } else if (token_len == 3 && str_startsWithCase(source + i + 1, "ub")) {
                     ADD_TOKEN(TOKEN_PUB, i, i + 3);
                     break;
+                } else if (token_len == 9 && str_startsWithCase(source + i + 1, "rotofunc")) {
+                    ADD_TOKEN(TOKEN_PROTOFUNC, i, i + 9);
+                    break;
                 }
                 goto main_default;
                 case 'r':

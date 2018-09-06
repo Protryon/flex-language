@@ -209,9 +209,12 @@ struct ast_node_vardecl {
 struct ast_node_type {
     char* name;
     uint8_t variadic;
+    uint8_t protofunc;
     uint64_t array_pointer_bitlist;
     uint8_t array_pointer_count;
     struct arraylist* generics;
+    struct ast_node* protofunc_return_type;
+    struct arraylist* protofunc_arguments;
 };
 
 struct ast_node_integer_lit {
@@ -323,6 +326,7 @@ struct ast_node_imp_new {
 
 struct ast_node {
     uint8_t type;
+    uint8_t scope_override;
     uint64_t start_line;
     uint64_t end_line;
     uint64_t start_col;
@@ -377,7 +381,7 @@ struct parse_error {
 
 struct parse_ctx {
     struct arraylist* parse_errors;
-    uint8_t sequence_disabled;
+    uint8_t flags; // 0x1 == sequence_disabled, 0x2 = semi_disabled, 0x4 = colon_disabled
 };
 
 struct parse_intermediates {
