@@ -27,13 +27,14 @@ priv module mod2 {
         if (arg *== arg < 5) 5 else -5
     }
 
-    pub func uint32 namedFunc3(uint32 arg = 5, uint32... more) uint32 ctr, (for (uint32 m : more) if (arg > more) ctr++), ctr
+    pub func uint32 namedFunc3(uint32 arg = 5, uint32... more) uint32 ctr, (for (uint32 m : more) if (arg > m) ctr++), ctr
 }
 
 prot module mod3 {
     pub class class1 {
 
-        priv uint32[] internal_arr = [7];
+        priv class1[] internal_arr = [7];
+        priv class1[] internal_arr = [8];
         priv uint32[] internal_arr2(7);
         synch uint32 synch_int = 5;
         csig uint32 csig_int = 456;

@@ -4,6 +4,7 @@
 #include "xstring.h"
 #include "streams.h"
 #include "info.h"
+#include "prog_ir.h"
 #include <unistd.h>
 #include <stdio.h>
 #include <stdint.h>
@@ -221,7 +222,8 @@ int main(int argc, char* argv[]) {
 
     struct input_file input_data[input_file_count];
     int lex_error_count = 0;
-
+    int parse_error_count = 0;
+    struct arraylist* allfiles = arraylist_new(16, sizeof(struct ast_node*));
     for (int i = 0; i < input_file_count; i++) {
         struct input_file* input = &input_data[i];
         input->filename = strrchr(input_contents[i].filename, '/');
@@ -267,12 +269,21 @@ int main(int argc, char* argv[]) {
                 struct parse_error* error = arraylist_getptr(input->parse_ctx->parse_errors, i);
                 fprintf(stderr, "%s\n", error->message);
             }
+            parse_error_count += input->parse_ctx->parse_errors->entry_count;
+            continue;
+        } else {
+            arraylist_addptr(allfiles, input->root);
         }
     }
     if (lex_error_count > 0) {
         LEX_ERROR("You have %u invalid symbol(s), compilation terminated.", lex_error_count);
         return 1;
     }
+    if (parse_error_count > 0) {
+        fprintf(stderr, "You have %u invalid tokens(s), compilation terminated.", parse_error_count);
+        return 1;
+    }
+    struct prog_state* prog_ctx = gen_prog(allfiles);
 
     if (outputLex != NULL) {
         int fd = open(outputLex, O_RDWR | O_CREAT | O_TRUNC, 0664);

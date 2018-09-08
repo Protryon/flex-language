@@ -9,7 +9,7 @@ uint64_t hashmap_hash(char* key, size_t size) {
     size_t kl = strlen(key);
     size_t i = 0;
     uint64_t hash = 0x8888888888888888;
-    for(; i < kl; i += 8) {
+    for(; i + 8 < kl; i += 8) {
         uint64_t v = *(uint64_t*)&key[i];
         hash = hash ^ v;
     }
@@ -17,7 +17,7 @@ uint64_t hashmap_hash(char* key, size_t size) {
         uint64_t v = *(uint64_t*)&key[kl - 8];
         hash = hash ^ v;
     } else {
-        for(i = 0; i < kl; i++) {
+        for(; i < kl; i++) {
             uint8_t v = key[i];
             hash = hash ^ (v << (8 * i));
         }

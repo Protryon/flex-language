@@ -3,3 +3,6 @@ build
 *.ast
 *.lex
 Makefile.dep
+.idea
+CMakeLists.txt
+cmake-build-debug

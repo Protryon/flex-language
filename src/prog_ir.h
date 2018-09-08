@@ -83,7 +83,9 @@ struct prog_func {
     struct arraylist* closures;
     struct {
         struct ast_node* body;
+        struct ast_node* root;
     } proc;
+
 };
 
 struct prog_var { // only interfunc vars
@@ -117,25 +119,33 @@ enum prim_type {
     PRIM_BYTE = PRIM_U8,
     PRIM_C = PRIM_U8,
     PRIM_CHAR = PRIM_U8,
+    PRIM_UINT8 = PRIM_U8,
     PRIM_I8,
+    PRIM_INT8 = PRIM_I8,
     PRIM_U16,
     PRIM_USH = PRIM_U16,
     PRIM_USHORT = PRIM_U16,
+    PRIM_UINT16 = PRIM_U16,
     PRIM_I16,
     PRIM_SH = PRIM_I16,
     PRIM_SHORT = PRIM_I16,
+    PRIM_INT16 = PRIM_I16,
     PRIM_U32,
     PRIM_U = PRIM_U32,
     PRIM_UINT = PRIM_U32,
+    PRIM_UINT32 = PRIM_U32,
     PRIM_I32,
     PRIM_I = PRIM_I32,
     PRIM_INT = PRIM_I32,
+    PRIM_INT32 = PRIM_I32,
     PRIM_U64,
     PRIM_UL = PRIM_U64,
     PRIM_ULONG = PRIM_U64,
+    PRIM_UINT64 = PRIM_U64,
     PRIM_I64,
     PRIM_L = PRIM_I64,
     PRIM_LONG = PRIM_I64,
+    PRIM_INT64 = PRIM_I64,
     PRIM_F,
     PRIM_FLOAT = PRIM_F,
     PRIM_D,
@@ -174,5 +184,8 @@ struct prog_state {
     struct hashmap* node_map;
     uint64_t next_var_id;
 };
+
+struct prog_state* gen_prog(struct arraylist* files);
+
 
 #endif

@@ -632,7 +632,7 @@ struct ast_node* parse_primary_expression(struct parse_ctx* ctx, struct token***
         node->data.char_lit.lit = EAT(TOKEN_CHAR_LIT)->value;
         END_NODE(node);
         return node;
-        case TOKEN_PROTOFUNC:
+        case TOKEN_PROTOFUNC:;
         uint8_t protofunc = 1;
         goto pf;
         case TOKEN_IDENTIFIER:
@@ -1492,7 +1492,8 @@ struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size
     node->data.class.virt = virt;
     node->data.class.iface = iface;
     EXPECT_TOKEN(TOKEN_CLASS, "class");
-    node->data.class.name = ttok->value;
+    node->data.class.name = parse_type(ctx, tokens, token_count, 0, 0, 1, 1);
+    CHECK_EXPR_AND(node->data.class.name, free_ast_node(node));
     if (EAT(TOKEN_COLON)) {
         node->data.class.parents = arraylist_new(2, sizeof(struct ast_node*));
         do {
@@ -1528,9 +1529,6 @@ struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size
             arraylist_addptr(node->data.class.body->data.body.children, child_node);
         } else if (!MATCH(TOKEN_RCURLY)) {
             PARSE_ERROR_UNEXPECTED_TOKEN(EOF_ERROR_TOKEN, "'func', '<', type, or '}'. Confirm correct modifiers");
-            if (*token_count <= 0) {
-                break;
-            }
         } else {
             break;
         }
