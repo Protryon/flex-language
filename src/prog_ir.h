@@ -53,6 +53,7 @@ struct prog_node {
 struct prog_class {
     struct prog_module* module;
     struct prog_type* type;
+    struct prog_file* file;
     uint8_t prot;
     uint8_t typed;
     uint8_t synch;
@@ -69,6 +70,7 @@ struct prog_func {
     struct prog_module* module;
     struct prog_class* clas; // VScode thinks class is a keyword in C...
     struct prog_func* closing;
+    struct prog_file* file;
     char* name;
     uint64_t uid;
     uint8_t anonymous;
@@ -92,6 +94,7 @@ struct prog_var { // only interfunc vars
     struct prog_module* module;
     struct prog_class* clas; // VScode thinks class is a keyword in C...
     struct prog_func* func;
+    struct prog_file* file;
     char* name;
     uint64_t uid;
     uint8_t prot;
@@ -161,6 +164,7 @@ struct prog_type {
     uint8_t is_master;
     struct prog_type* master_type;
     struct ast_node* ast;
+    struct prog_file* file;
     struct hashmap* generics;
     union {
         struct {

@@ -318,6 +318,7 @@ struct ast_node_new {
 
 struct ast_node_import {
     struct ast_node* what;
+    struct prog_file* file;
 };
 
 struct ast_node_imp_new {

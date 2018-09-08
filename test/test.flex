@@ -68,3 +68,8 @@ module mod4 {
 
     func class1 f() []
 }
+
+module mod4 {
+
+    func class1 f2() []
+}

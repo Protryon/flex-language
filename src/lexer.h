@@ -110,7 +110,10 @@ typedef enum {
     TOKEN_INST,
     TOKEN_IMPORT,
     TOKEN_ELLIPSIS,
-    TOKEN_PROTOFUNC
+    TOKEN_PROTOFUNC,
+    TOKEN_CONST,
+    TOKEN_PURE,
+    TOKEN_STATIC
 } token_type;
 
 struct token {
