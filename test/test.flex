@@ -63,13 +63,13 @@ prot module mod3 {
     }
 }
 
-module mod4 {
+module mod4.test {
     import mod3
 
     func class1 f() []
 }
 
-module mod4 {
+module mod4.test {
 
     func class1 f2() []
 }

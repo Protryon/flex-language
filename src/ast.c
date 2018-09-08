@@ -169,6 +169,7 @@ struct ast_node* traverse_node(struct ast_node* root, struct ast_node* (traverse
         break;
         case AST_NODE_TYPE:
         TRAVERSE_ARRAYLIST(root->data.type.generics);
+        TRAVERSE_ARRAYLIST(root->data.type.protofunc_arguments);
         break;
         case AST_NODE_UNARY:
         TRAVERSE(root->data.unary.child);
@@ -215,9 +216,16 @@ struct ast_node* _free_ast_node(struct ast_node* node, void* arg) {
         break;
         case AST_NODE_TYPE:
         arraylist_free(node->data.type.generics);
+        arraylist_free(node->data.type.protofunc_arguments);
         break;
         case AST_NODE_VAR_DECL:
         arraylist_free(node->data.vardecl.cons_init);
+        break;
+        case AST_NODE_MODULE:
+        arraylist_free(node->data.module.name_list);
+        break;
+        case AST_NODE_IMP_NEW:
+        arraylist_free(node->data.imp_new.parameters);
     }
     free(node);
     return NULL;
@@ -228,8 +236,8 @@ void free_ast_node(struct ast_node* node) {
     traverse_node(node, _free_ast_node, NULL, 0);
 }
 
-struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig);
-struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig);
+struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig, uint8_t stat, uint8_t pure);
+struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig, uint8_t stat, uint8_t pure);
 
 struct ast_node* parse_identifier(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count) {
     INIT_PARSE_FUNC();
@@ -243,8 +251,6 @@ struct ast_node* parse_identifier(struct parse_ctx* ctx, struct token*** tokens,
 
 struct ast_node* parse_expression_maybe_semicolon(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
 struct ast_node* parse_expression(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
-struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t csig, uint8_t can_variadic, uint8_t can_init, uint8_t can_semi);
-
 struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t can_variadic, uint8_t can_ptrarr, uint8_t can_generic, uint8_t can_generic_generic) {
     INIT_PARSE_FUNC();
     ALLOC_NODE(AST_NODE_TYPE);
@@ -299,6 +305,8 @@ struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_
     END_NODE(node);
     return node;
 }
+
+struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t csig, uint8_t stat, uint8_t cons, uint8_t can_variadic, uint8_t can_init, uint8_t can_semi);
 
 struct ast_node* parse_body(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count) {
     INIT_PARSE_FUNC();
@@ -472,7 +480,7 @@ struct ast_node* parse_try_expression(struct parse_ctx* ctx, struct token*** tok
     if (MATCH(TOKEN_CATCH)) {
         EAT(TOKEN_CATCH);
         EXPECT_TOKEN(TOKEN_LPAREN, "(");
-        node->data.try.catch_var_decl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 0, 0);
+        node->data.try.catch_var_decl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 0, 0, 0, 0);
         CHECK_EXPR_AND(node->data.try.catch_var_decl, free_ast_node(node); ctx->flags = flags);
         EXPECT_TOKEN(TOKEN_RPAREN, ")");
         ctx->flags = flags;
@@ -585,10 +593,11 @@ struct ast_node* parse_primary_expression(struct parse_ctx* ctx, struct token***
         case TOKEN_FUNC:;
         uint8_t async = EAT(TOKEN_ASYNC);
         uint8_t synch = EAT(TOKEN_SYNCH);
+        uint8_t pure = EAT(TOKEN_PURE);
         if (MATCH(TOKEN_FUNC)) goto func;
-        return parse_lambda_func(ctx, tokens, token_count, PROTECTION_PRIV, synch, 0, async, 0);
+        return parse_lambda_func(ctx, tokens, token_count, PROTECTION_PRIV, synch, 0, async, 0, 0, pure);
         func:;
-        return parse_func(ctx, tokens, token_count, PROTECTION_PRIV, synch, 0, async, 0);
+        return parse_func(ctx, tokens, token_count, PROTECTION_PRIV, synch, 0, async, 0, 0, pure);
         case TOKEN_LPAREN:
         EXPECT_TOKEN(TOKEN_LPAREN, "(");
         uint8_t flags = ctx->flags;
@@ -644,7 +653,7 @@ struct ast_node* parse_primary_expression(struct parse_ctx* ctx, struct token***
         if (MATCH_TYPE()) {
             STORE_TOKEN_STATE(state2);
             RESTORE_TOKEN_STATE(state1);
-            node = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 1, 0);
+            node = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 0, 0, 1, 0);
             if (node != NULL) {
                 return node;
             }
@@ -1375,13 +1384,15 @@ struct ast_node* parse_expression_maybe_semicolon(struct parse_ctx* ctx, struct 
     return node;
 }
 
-struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t csig, uint8_t can_variadic, uint8_t can_init, uint8_t can_semi) {
+struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t csig, uint8_t stat, uint8_t cons, uint8_t can_variadic, uint8_t can_init, uint8_t can_semi) {
     INIT_PARSE_FUNC();
     ALLOC_NODE(AST_NODE_VAR_DECL);
     START_NODE(node);
     node->data.vardecl.prot = prot;
     node->data.vardecl.synch = synch;
     node->data.vardecl.csig = csig;
+    node->data.vardecl.stat = stat;
+    node->data.vardecl.cons = cons;
     node->data.vardecl.type = parse_type(ctx, tokens, token_count, can_variadic, 1, 1, 1);
     CHECK_EXPR_AND(node->data.vardecl.type, free_ast_node(node));
     EXPECT_TOKEN(TOKEN_IDENTIFIER, "identifier");
@@ -1413,7 +1424,7 @@ struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, si
     return node;
 }
 
-struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig) {
+struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig, uint8_t stat, uint8_t pure) {
     INIT_PARSE_FUNC()
     ALLOC_NODE(AST_NODE_FUNC);
     START_NODE(node);
@@ -1423,6 +1434,8 @@ struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_
     node->data.func.virt = virt;
     node->data.func.async = async;
     node->data.func.csig = csig;
+    node->data.func.stat = stat;
+    node->data.func.pure = pure;
     node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
     CHECK_EXPR_AND(node->data.func.return_type, free_ast_node(node));
     struct token* name_token = EAT(TOKEN_IDENTIFIER);
@@ -1436,7 +1449,7 @@ struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_
         uint8_t flags = ctx->flags;
         do {
             ctx->flags = 1;
-            struct ast_node* vardecl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 1, 1, 0);
+            struct ast_node* vardecl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 0, 1, 1, 0);
             CHECK_EXPR_AND(vardecl, free_ast_node(node); ctx->flags = flags);
             arraylist_addptr(node->data.func.arguments, vardecl);
         } while (EAT(TOKEN_COMMA));
@@ -1449,7 +1462,7 @@ struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_
     return node;
 }
 
-struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig) {
+struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t async, uint8_t csig, uint8_t stat, uint8_t pure) {
     INIT_PARSE_FUNC()
     ALLOC_NODE(AST_NODE_FUNC);
     START_NODE(node);
@@ -1458,13 +1471,15 @@ struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens
     node->data.func.virt = virt;
     node->data.func.async = async;
     node->data.func.csig = csig;
+    node->data.func.stat = stat;
+    node->data.func.pure = pure;
     EXPECT_TOKEN(TOKEN_LT, "<");
     if (!EAT(TOKEN_GT)) {
         node->data.func.arguments = arraylist_new(4, sizeof(struct ast_node*));
         uint8_t flags = ctx->flags;
         do {
             ctx->flags = 1;
-            struct ast_node* vardecl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 1, 1, 0);
+            struct ast_node* vardecl = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 0, 1, 1, 0);
             CHECK_EXPR_AND(vardecl, free_ast_node(node); ctx->flags = flags);
             arraylist_addptr(node->data.func.arguments, vardecl);
         } while (EAT(TOKEN_COMMA));
@@ -1482,7 +1497,7 @@ struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens
     return node;
 }
 
-struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t typed, uint8_t synch, uint8_t virt, uint8_t iface) {
+struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t typed, uint8_t synch, uint8_t virt, uint8_t iface, uint8_t pure) {
     INIT_PARSE_FUNC();
     ALLOC_NODE(AST_NODE_CLASS);
     START_NODE(node);
@@ -1491,6 +1506,7 @@ struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size
     node->data.class.synch = synch;
     node->data.class.virt = virt;
     node->data.class.iface = iface;
+    node->data.class.pure = pure;
     EXPECT_TOKEN(TOKEN_CLASS, "class");
     node->data.class.name = parse_type(ctx, tokens, token_count, 0, 0, 1, 1);
     CHECK_EXPR_AND(node->data.class.name, free_ast_node(node));
@@ -1513,18 +1529,21 @@ struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size
         uint8_t virt = EAT(TOKEN_VIRT);
         uint8_t async = EAT(TOKEN_ASYNC);
         uint8_t csig = EAT(TOKEN_CSIG);
-        uint8_t can_var = !virt && !async;
+        uint8_t stat = EAT(TOKEN_STATIC);
+        uint8_t cons = EAT(TOKEN_CONST);
+        uint8_t pure = EAT(TOKEN_PURE);
+        uint8_t can_var = !virt && !async && !pure;
         struct ast_node* child_node = NULL;
-        if (MATCH(TOKEN_FUNC)) {
-            child_node = parse_func(ctx, tokens, token_count, prot, synch, virt, async, csig);
+        if (!cons && MATCH(TOKEN_FUNC)) {
+            child_node = parse_func(ctx, tokens, token_count, prot, synch, virt, async, csig, stat, pure);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.class.body->data.body.children, child_node);
-        } else if (MATCH(TOKEN_LT)) {
-            child_node = parse_lambda_func(ctx, tokens, token_count, prot, synch, virt, async, csig);
+        } else if (!cons && MATCH(TOKEN_LT)) {
+            child_node = parse_lambda_func(ctx, tokens, token_count, prot, synch, virt, async, csig, stat, pure);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.class.body->data.body.children, child_node);
         } else if (can_var && MATCH_TYPE()) {
-            child_node = parse_vardecl(ctx, tokens, token_count, prot, synch, csig, 0, 1, 1);
+            child_node = parse_vardecl(ctx, tokens, token_count, prot, synch, csig, stat, cons, 0, 1, 1);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.class.body->data.body.children, child_node);
         } else if (!MATCH(TOKEN_RCURLY)) {
@@ -1565,8 +1584,11 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
     node->data.module.body->type = AST_NODE_BODY;
     node->data.module.body->data.body.children = arraylist_new(4, sizeof(struct ast_node*));
     EXPECT_TOKEN(TOKEN_MODULE, "module");
-    EXPECT_TOKEN(TOKEN_IDENTIFIER, "identifier");
-    node->data.module.name = ttok->value;
+    node->data.module.name_list = arraylist_new(4, sizeof(char*));
+    do {
+        EXPECT_TOKEN(TOKEN_IDENTIFIER, "identifier");
+        arraylist_addptr(node->data.module.name_list, ttok->value);
+    } while(EAT(TOKEN_PERIOD));
     START_NODE(node->data.module.body);
     EXPECT_TOKEN(TOKEN_LCURLY, "{");
     while (1) {
@@ -1577,10 +1599,12 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
         uint8_t iface = EAT(TOKEN_IFACE);
         uint8_t async = EAT(TOKEN_ASYNC);
         uint8_t csig = EAT(TOKEN_CSIG);
-        uint8_t can_module = !typed && !synch && !virt && !iface && !async && !csig;
-        uint8_t can_class = !async && !csig;
-        uint8_t can_func = !typed && !iface;
-        uint8_t can_var = !typed && !virt && !iface && !async;
+        uint8_t cons = EAT(TOKEN_CONST);
+        uint8_t pure = EAT(TOKEN_PURE);
+        uint8_t can_module = !typed && !synch && !virt && !iface && !async && !csig && !pure && !cons;
+        uint8_t can_class = !async && !csig && !cons;
+        uint8_t can_func = !typed && !iface && !cons;
+        uint8_t can_var = !typed && !virt && !iface && !async && !pure;
         struct ast_node* child_node = NULL;
         if (can_module && MATCH(TOKEN_MODULE)) {
             child_node = parse_module(ctx, tokens, token_count, prot);
@@ -1591,19 +1615,19 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.module.body->data.body.children, child_node);
         } else if (can_class && MATCH(TOKEN_CLASS)) {
-            child_node = parse_class(ctx, tokens, token_count, prot, typed, synch, virt, iface);
+            child_node = parse_class(ctx, tokens, token_count, prot, typed, synch, virt, iface, pure);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.module.body->data.body.children, child_node);
         } else if (can_func && MATCH(TOKEN_FUNC)) {
-            child_node = parse_func(ctx, tokens, token_count, prot, synch, virt, async, csig);
+            child_node = parse_func(ctx, tokens, token_count, prot, synch, virt, async, csig, 0, pure);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.module.body->data.body.children, child_node);
         } else if (can_func && MATCH(TOKEN_LT)) {
-            child_node = parse_lambda_func(ctx, tokens, token_count, prot, synch, virt, async, csig);
+            child_node = parse_lambda_func(ctx, tokens, token_count, prot, synch, virt, async, csig, 0, pure);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.module.body->data.body.children, child_node);
         } else if (can_var && MATCH_TYPE()) {
-            child_node = parse_vardecl(ctx, tokens, token_count, prot, synch, csig, 0, 1, 1);
+            child_node = parse_vardecl(ctx, tokens, token_count, prot, synch, csig, cons, 0, 0, 1, 1);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.module.body->data.body.children, child_node);
         } else if (!MATCH(TOKEN_RCURLY)) {

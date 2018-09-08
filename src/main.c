@@ -79,7 +79,11 @@ struct ast_node* print_ast(struct ast_node* node, int fd) {
         break;
         case AST_NODE_MODULE:
         dprintf(fd, "prot = %s\n", PROT_STRING[node->data.module.prot]);
-        dprintf(fd, "name = %s\n", node->data.module.name);
+        dprintf(fd, "name = ");
+        for (size_t i = 0; i < node->data.module.name_list->entry_count; i++) {
+            dprintf(fd, "%s%s", i == 0 ? "" : ".", arraylist_getptr(node->data.module.name_list, i));
+        }
+        dprintf(fd, "\n");
         break;
         case AST_NODE_NEW:
         break;

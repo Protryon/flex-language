@@ -59,6 +59,7 @@ struct prog_class {
     uint8_t synch;
     uint8_t virt;
     uint8_t iface;
+    uint8_t pure;
     char* name;
     struct arraylist* parents;
     struct hashmap* funcs;
@@ -79,6 +80,8 @@ struct prog_func {
     uint8_t virt;
     uint8_t async;
     uint8_t csig;
+    uint8_t stat;
+    uint8_t pure;
     struct prog_type* return_type;
     struct hashmap* arguments;
     struct hashmap* node_map;
@@ -100,7 +103,8 @@ struct prog_var { // only interfunc vars
     uint8_t prot;
     uint8_t synch;
     uint8_t csig;
-    uint8_t is_const;
+    uint8_t stat;
+    uint8_t cons;
     struct prog_type* type;
     struct {
         struct ast_node* init;

@@ -375,6 +375,9 @@ void tokenize(char* source, size_t src_len, struct arraylist* tokens) {
                 } else if (token_len == 5 && str_startsWithCase(source + i + 1, "atch")) {
                     ADD_TOKEN(TOKEN_CATCH, i, i + 5);
                     break;
+                } else if (token_len == 5 && str_startsWithCase(source + i + 1, "onst")) {
+                    ADD_TOKEN(TOKEN_CONST, i, i + 5);
+                    break;
                 }
                 goto main_default;
                 case 'd':
@@ -450,6 +453,9 @@ void tokenize(char* source, size_t src_len, struct arraylist* tokens) {
                 } else if (token_len == 9 && str_startsWithCase(source + i + 1, "rotofunc")) {
                     ADD_TOKEN(TOKEN_PROTOFUNC, i, i + 9);
                     break;
+                } else if (token_len == 4 && str_startsWithCase(source + i + 1, "ure")) {
+                    ADD_TOKEN(TOKEN_PURE, i, i + 4);
+                    break;
                 }
                 goto main_default;
                 case 'r':
@@ -464,6 +470,9 @@ void tokenize(char* source, size_t src_len, struct arraylist* tokens) {
                     break;
                 } else if (token_len == 5 && str_startsWithCase(source + i + 1, "ynch")) {
                     ADD_TOKEN(TOKEN_SYNCH, i, i + 5);
+                    break;
+                } else if (token_len == 6 && str_startsWithCase(source + i + 1, "tatic")) {
+                    ADD_TOKEN(TOKEN_STATIC, i, i + 6);
                     break;
                 }
                 goto main_default;

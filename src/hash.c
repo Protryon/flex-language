@@ -3,6 +3,7 @@
 #include <unistd.h>
 #include "hash.h"
 #include "smem.h"
+#include <string.h>
 
 uint64_t hashmap_hash(char* key, size_t size) {
     if (key == NULL) return 0;
@@ -35,6 +36,9 @@ uint64_t hashmap_hash(char* key, size_t size) {
     }
     return hash;
 }
+
+void hashset_fixcap(struct hashset* set);
+void hashmap_fixcap(struct hashmap* map);
 
 struct hashmap* new_hashmap(size_t init_cap) {
     struct hashmap* map = smalloc(sizeof(struct hashmap));

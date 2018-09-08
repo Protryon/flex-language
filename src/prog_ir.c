@@ -166,6 +166,8 @@ struct prog_func* gen_prog_func_func(struct prog_state* state, struct prog_file*
     fun->synch = func->data.func.synch;
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
+    fun->pure = func->data.func.pure;
+    fun->stat = func->data.func.stat;
     fun->arguments = new_hashmap(4);
     fun->node_map = new_hashmap(4);
     fun->proc.root = func;
@@ -245,6 +247,8 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct prog_file*
     fun->synch = func->data.func.synch;
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
+    fun->stat = func->data.func.stat;
+    fun->pure = func->data.func.pure;
     fun->arguments = new_hashmap(4);
     fun->node_map = new_hashmap(4);
     struct prog_node* node = scalloc(sizeof(struct prog_node));
@@ -291,7 +295,8 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct prog_file*
         var->prot = fun->prot;
         var->synch = fun->synch;
         var->csig = fun->csig;
-        var->is_const = 1;
+        var->cons = 1;
+        var->stat = fun->stat;
         var->type = gen_prog_type(func, fun->file, 0, 0);
         struct preprocess_ctx lctx = (struct preprocess_ctx) {state, NULL, parent, NULL, file};
         hashmap_put(parent->vars, var->name, var);
@@ -308,6 +313,8 @@ void gen_prog_clas_var(struct prog_state* state, struct prog_file* file, struct 
     var->prot = parent->prot == PROTECTION_NONE || parent->prot >= vard->data.vardecl.prot ? vard->data.vardecl.prot : parent->prot;
     var->synch = vard->data.vardecl.synch;
     var->csig = vard->data.vardecl.csig;
+    var->stat = vard->data.vardecl.stat;
+    var->cons = vard->data.vardecl.cons;
     var->type = gen_prog_type(vard->data.vardecl.type, file, 0, 0);
     var->proc.init = vard->data.vardecl.init;
     struct preprocess_ctx lctx = (struct preprocess_ctx) {state, NULL, parent, NULL, file};
@@ -333,6 +340,7 @@ void gen_prog_class(struct prog_state* state, struct prog_file* file, struct ast
     cl->virt = clas->data.class.virt;
     cl->synch = clas->data.class.synch;
     cl->iface = clas->data.class.iface;
+    cl->pure = clas->data.class.pure;
     cl->module = parent;
     cl->vars = new_hashmap(4);
     cl->node_map = new_hashmap(4);
@@ -367,6 +375,8 @@ struct prog_func* gen_prog_mod_func(struct prog_state* state, struct prog_file* 
     fun->synch = func->data.func.synch;
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
+    fun->pure = func->data.func.pure;
+    fun->stat = func->data.func.stat;
     fun->arguments = new_hashmap(4);
     fun->node_map = new_hashmap(4);
     struct prog_node* node = scalloc(sizeof(struct prog_node));
@@ -413,7 +423,8 @@ struct prog_func* gen_prog_mod_func(struct prog_state* state, struct prog_file* 
         var->prot = fun->prot;
         var->synch = fun->synch;
         var->csig = fun->csig;
-        var->is_const = 1;
+        var->cons = 1;
+        var->stat = fun->stat;
         var->type = gen_prog_type(func, fun->file, 0, 0);
         struct preprocess_ctx lctx = (struct preprocess_ctx) {state, parent, NULL, NULL, file};
         hashmap_put(parent->vars, var->name, var);
@@ -430,6 +441,8 @@ void gen_prog_mod_var(struct prog_state* state, struct prog_file* file, struct a
     var->prot = parent->prot == PROTECTION_NONE || parent->prot >= vard->data.vardecl.prot ? vard->data.vardecl.prot : parent->prot;
     var->synch = vard->data.vardecl.synch;
     var->csig = vard->data.vardecl.csig;
+    var->stat = vard->data.vardecl.stat;
+    var->cons = vard->data.vardecl.cons;
     var->type = gen_prog_type(vard->data.vardecl.type, file, 0, 0);
     var->proc.init = vard->data.vardecl.init;
     struct preprocess_ctx lctx = (struct preprocess_ctx) {state, NULL, NULL, parent, file};
@@ -445,37 +458,52 @@ void gen_prog_mod_var(struct prog_state* state, struct prog_file* file, struct a
 
 void gen_prog_module(struct prog_state* state, struct prog_file* file, struct ast_node* module, struct prog_module* parent) {
     struct prog_module* mod = NULL;
-    if (parent == NULL) {
-        mod = hashmap_get(state->modules, module->data.module.name);
-    } else {
-        mod = hashmap_get(parent->submodules, module->data.module.name);
-    }
     struct {
-        struct prog_file* file;
+        struct prog_file *file;
     } file_cont;
     file_cont.file = file;
-    if (mod == NULL) {
-        mod = scalloc(sizeof(struct prog_module));
-        mod->name = module->data.module.name;
-        mod->prot = module->data.module.prot;
-        mod->file = file;
-        mod->submodules = new_hashmap(4);
-        mod->vars = new_hashmap(4);
-        mod->node_map = new_hashmap(4);
-        mod->classes = new_hashmap(4);
-        mod->funcs = new_hashmap(4);
-        mod->types = new_hashmap(16);
-        mod->imported_modules = arraylist_new(4, sizeof(struct ast_node*));
-        mod->parent = parent;
-    } else {
-        if (mod->prot != module->data.module.prot) {
-            PROG_ERROR_AST((&file_cont), module, "conflicting module properties");
+    for (size_t i = 0; i < module->data.module.name_list->entry_count; i++) {
+        int is_last = i == module->data.module.name_list->entry_count - 1;
+        char* ident = arraylist_getptr(module->data.module.name_list, i);
+        if (mod != NULL) {
+            parent = mod;
+            mod = NULL;
+        }
+        if (parent == NULL) {
+            mod = hashmap_get(state->modules, ident);
+        } else {
+            mod = hashmap_get(parent->submodules, ident);
+        }
+        if (mod == NULL) {
+            mod = scalloc(sizeof(struct prog_module));
+            mod->name = ident;
+            if (is_last) {
+                mod->prot = module->data.module.prot;
+            } else {
+                mod->prot = PROTECTION_NONE;
+            }
+            mod->file = file;
+            mod->submodules = new_hashmap(4);
+            mod->vars = new_hashmap(4);
+            mod->node_map = new_hashmap(4);
+            mod->classes = new_hashmap(4);
+            mod->funcs = new_hashmap(4);
+            mod->types = new_hashmap(16);
+            mod->imported_modules = arraylist_new(4, sizeof(struct ast_node *));
+            mod->parent = parent;
+        } else {
+            if (is_last && mod->prot != module->data.module.prot) {
+                PROG_ERROR_AST((&file_cont), module, "conflicting module properties");
+            }
+        }
+        if (parent == NULL) {
+            hashmap_put(state->modules, mod->name, mod);
+        } else {
+            hashmap_put(parent->submodules, mod->name, mod);
         }
     }
-    if (parent == NULL) {
-        hashmap_put(state->modules, mod->name, mod);
-    } else {
-        hashmap_put(parent->submodules, mod->name, mod);
+    if (mod == NULL) {
+        return;
     }
     for (size_t i = 0; i < module->data.module.body->data.body.children->entry_count; i++) {
         struct ast_node* node = arraylist_getptr(module->data.module.body->data.body.children, i);
@@ -810,7 +838,8 @@ void scope_analysis_expr(struct prog_state* state, struct ast_node* root, struct
                         var->prot = PROTECTION_PRIV;
                         var->synch = func->synch;
                         var->csig = func->csig;
-                        var->is_const = 1;
+                        var->cons = 1;
+                        var->stat = func->stat;
                         var->type = gen_prog_type(func, clas->file, 0, 0);
                         hashmap_put(stack->vars, func->name, var);
                     }

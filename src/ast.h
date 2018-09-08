@@ -138,7 +138,7 @@ struct ast_node_file {
 
 struct ast_node_module {
     uint8_t prot;
-    char* name;
+    struct arraylist* name_list;
     struct ast_node* body;
 };
 
@@ -148,6 +148,7 @@ struct ast_node_class {
     uint8_t synch;
     uint8_t virt;
     uint8_t iface;
+    uint8_t pure;
     struct ast_node* name;
     struct arraylist* parents;
     struct ast_node* body;
@@ -159,6 +160,8 @@ struct ast_node_func {
     uint8_t virt;
     uint8_t async;
     uint8_t csig;
+    uint8_t stat;
+    uint8_t pure;
     struct ast_node* return_type;
     char* name;
     struct arraylist* arguments;
@@ -200,6 +203,8 @@ struct ast_node_vardecl {
     uint8_t prot;
     uint8_t synch;
     uint8_t csig;
+    uint8_t stat;
+    uint8_t cons;
     struct ast_node* type;
     char* name;
     struct ast_node* init;
