@@ -477,10 +477,7 @@ void tokenize(char* source, size_t src_len, struct arraylist* tokens) {
                 }
                 goto main_default;
                 case 't':
-                if (token_len == 5 && str_startsWithCase(source + i + 1, "yped")) {
-                    ADD_TOKEN(TOKEN_TYPED, i, i + 5);
-                    break;
-                } else if (token_len == 3 && str_startsWithCase(source + i + 1, "ry")) {
+                if (token_len == 3 && str_startsWithCase(source + i + 1, "ry")) {
                     ADD_TOKEN(TOKEN_TRY, i, i + 3);
                     break;
                 } else if (token_len == 5 && str_startsWithCase(source + i + 1, "hrow")) {

@@ -31,6 +31,13 @@ priv module mod2 {
 }
 
 prot module mod3 {
+
+    pub class genclass<A, B> {
+        pub func A sum(A a, B b) {
+            ret a + b;
+        }
+    }
+
     pub class class1 {
 
         priv class1[] internal_arr = [7];

@@ -63,6 +63,12 @@ enum unary_ops {
 
 enum binary_ops {
     BINARY_OP_MEMBER,
+    BINARY_OP_SEQUENCE,
+    BINARY_OP_EQ_VAL,
+    BINARY_OP_NEQ_VAL,
+    BINARY_OP_EQ,
+    BINARY_OP_NEQ,
+    BINARY_OP_START_ARITH = BINARY_OP_NEQ_VAL, // all after this is arithmetic
     BINARY_OP_MUL,
     BINARY_OP_DIV,
     BINARY_OP_MOD,
@@ -75,13 +81,12 @@ enum binary_ops {
     BINARY_OP_GT,
     BINARY_OP_GTE,
     BINARY_OP_INST,
-    BINARY_OP_EQ,
-    BINARY_OP_NEQ,
     BINARY_OP_AND,
     BINARY_OP_XOR,
     BINARY_OP_OR,
     BINARY_OP_LAND,
-    BINARY_OP_LOR,
+    BINARY_OP_LOR, // all values after this are strictly assignment
+    BINARY_OP_ASSNT = BINARY_OP_LOR,
     BINARY_OP_ASSN,
     BINARY_OP_MUL_ASSN,
     BINARY_OP_DIV_ASSN,
@@ -90,13 +95,12 @@ enum binary_ops {
     BINARY_OP_MINUS_ASSN,
     BINARY_OP_LSH_ASSN,
     BINARY_OP_RSH_ASSN,
-    BINARY_OP_EQ_VAL,
-    BINARY_OP_NEQ_VAL,
     BINARY_OP_AND_ASSN,
     BINARY_OP_XOR_ASSN,
     BINARY_OP_OR_ASSN,
     BINARY_OP_LAND_ASSN,
-    BINARY_OP_LOR_ASSN,
+    BINARY_OP_LOR_ASSN, // all values after this are strictly, assn_pre
+    BINARY_OP_ASSN_PRE = BINARY_OP_LOR_ASSN,
     BINARY_OP_MUL_ASSN_PRE,
     BINARY_OP_DIV_ASSN_PRE,
     BINARY_OP_MOD_ASSN_PRE,
@@ -108,8 +112,7 @@ enum binary_ops {
     BINARY_OP_XOR_ASSN_PRE,
     BINARY_OP_OR_ASSN_PRE,
     BINARY_OP_LAND_ASSN_PRE,
-    BINARY_OP_LOR_ASSN_PRE,
-    BINARY_OP_SEQUENCE
+    BINARY_OP_LOR_ASSN_PRE
 };
 
 #define PROTECTION_NONE 0
@@ -144,7 +147,6 @@ struct ast_node_module {
 
 struct ast_node_class {
     uint8_t prot;
-    uint8_t typed;
     uint8_t synch;
     uint8_t virt;
     uint8_t iface;
@@ -215,8 +217,9 @@ struct ast_node_type {
     char* name;
     uint8_t variadic;
     uint8_t protofunc;
-    uint64_t array_pointer_bitlist;
-    uint8_t array_pointer_count;
+    uint8_t array_dimensonality;
+    uint8_t is_ref;
+    uint8_t cons;
     struct arraylist* generics;
     struct ast_node* protofunc_return_type;
     struct arraylist* protofunc_arguments;
@@ -338,6 +341,7 @@ struct ast_node {
     uint64_t start_col;
     uint64_t end_col;
     struct prog_node* prog;
+    struct prog_type* output_type;
     union {
         struct ast_node_body body;
         struct ast_node_file file;

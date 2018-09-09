@@ -30,7 +30,6 @@ Allowed modifiers:
 * `pub`: No effect. Default protection.
 * `prot`: Same as module, except scope is within module.
 * `priv`: Same as module, except scope is within module.
-* `typed`: Class stores internal type information at runtime.
 * `synch`: All children are strictly read/written to atomically.
 * `virt`: This class may be inherited by other classes.
 * `iface`: This class may not define function bodies or variables. Used only to generalize types.

@@ -26,7 +26,6 @@
 #define CHECK_EXPR(node) if (node == NULL) { return NULL; };
 #define CHECK_EXPR_AND(node, and) if (node == NULL) { and; return NULL;};
 #define STORE_TOKEN_STATE(state) struct token** tokensState_##state = *tokens; size_t token_count_##state = *token_count; size_t error_entry_count_##state = ctx->parse_errors->entry_count;
-#define STORE2_TOKEN_STATE(state) tokensState_##state = *tokens; token_count_##state = *token_count; error_entry_count_##state = ctx->parse_errors->entry_count;
 #define RESTORE_TOKEN_STATE(state) *tokens = tokensState_##state; *token_count = token_count_##state; ctx->parse_errors->entry_count = error_entry_count_##state;
 
 const char* AST_TYPE_NAMES[] = {"BODY", "FILE", "MODULE", "CLASS", "FUNC", "UNARY_POSTFIX", "UNARY", "CALL", "CALC_MEMBER", "CAST", "BINARY", "VAR_DECL", "TYPE", "INTEGER_LIT", "DECIMAL_LIT", "STRING_LIT", "CHAR_LIT", "IDENTIFIER", "TERNARY", "IF", "FOR", "WHILE", "FOR_EACH", "SWITCH", "CASE", "DEFAULT_CASE", "GOTO", "RET", "CONTINUE", "BREAK", "TRY", "THROW", "NEW", "LABEL", "EMPTY", "IMPORT", "IMP_NEW", "NULL"};
@@ -58,7 +57,7 @@ int match_token(uint16_t token_type, struct token*** tokens, size_t* token_count
 #define MATCH(x) match_token(x, tokens, token_count)
 
 int match_type(struct token*** tokens, size_t* token_count) {
-    return MATCH(TOKEN_IDENTIFIER) || MATCH(TOKEN_PROTOFUNC);
+    return MATCH(TOKEN_IDENTIFIER) || MATCH(TOKEN_PROTOFUNC) || MATCH(TOKEN_CONST);
 }
 
 #define MATCH_TYPE() match_type(tokens, token_count)
@@ -251,20 +250,23 @@ struct ast_node* parse_identifier(struct parse_ctx* ctx, struct token*** tokens,
 
 struct ast_node* parse_expression_maybe_semicolon(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
 struct ast_node* parse_expression(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count);
-struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t can_variadic, uint8_t can_ptrarr, uint8_t can_generic, uint8_t can_generic_generic) {
+struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t can_variadic, uint8_t can_ptrarr, uint8_t can_generic, uint8_t can_generic_generic, uint8_t can_cons) {
     INIT_PARSE_FUNC();
     ALLOC_NODE(AST_NODE_TYPE);
     START_NODE(node);
+    if (can_cons && EAT(TOKEN_CONST)) {
+        node->data.type.cons = 1;
+    }
     if (EAT(TOKEN_PROTOFUNC)) {
         node->data.type.protofunc = 1;
         if (!MATCH(TOKEN_LPAREN)) {
-            node->data.type.protofunc_return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
+            node->data.type.protofunc_return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1, 1);
         }
         EXPECT_TOKEN(TOKEN_LPAREN, "(");
         if (!EAT(TOKEN_RPAREN)) {
             node->data.type.protofunc_arguments = arraylist_new(4, sizeof(struct ast_node*));
             do {
-                struct ast_node* nt = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
+                struct ast_node* nt = parse_type(ctx, tokens, token_count, 0, 1, 1, 1, 1);
                 arraylist_addptr(node->data.type.protofunc_arguments, nt);
             } while (EAT(TOKEN_COMMA));
             EXPECT_TOKEN(TOKEN_RPAREN, ")");
@@ -276,7 +278,7 @@ struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_
     if (can_generic && EAT(TOKEN_LT)) {
         node->data.type.generics = arraylist_new(1, sizeof(struct ast_node*));
         while (MATCH_TYPE()) {
-            struct ast_node* subtype = parse_type(ctx, tokens, token_count, 0, 1, can_generic_generic, can_generic_generic);
+            struct ast_node* subtype = parse_type(ctx, tokens, token_count, 0, 1, can_generic_generic, can_generic_generic, 0);
             CHECK_EXPR_AND(subtype, free_ast_node(node));
             arraylist_addptr(node->data.type.generics, subtype);
             if (!EAT(TOKEN_COMMA)) {
@@ -285,20 +287,20 @@ struct ast_node* parse_type(struct parse_ctx* ctx, struct token*** tokens, size_
         }
         EXPECT_TOKEN(TOKEN_GT, "'>'");
     }
-    if (can_ptrarr)
-        while (MATCH(TOKEN_LBRACK) || MATCH(TOKEN_MUL)) {
-            if (node->data.type.array_pointer_count >= 64) {
+    if (can_ptrarr) {
+        while (MATCH(TOKEN_LBRACK)) {
+            if (node->data.type.array_dimensonality >= 64) {
                 break;
             }
             if (EAT(TOKEN_LBRACK)) {
                 EXPECT_TOKEN(TOKEN_RBRACK, "]");
-                node->data.type.array_pointer_bitlist << 1;
-                node->data.type.array_pointer_count++;
-            } else if (EAT(TOKEN_MUL)) {
-                node->data.type.array_pointer_bitlist << 1 | 1;
-                node->data.type.array_pointer_count++;
+                node->data.type.array_dimensonality++;
             }
         }
+        if (node->data.type.array_dimensonality == 0 && node->data.type.generics == NULL) {
+            node->data.type.is_ref = EAT(TOKEN_AND) != NULL;
+        }
+    }
     if (can_variadic && EAT(TOKEN_ELLIPSIS)) {
         node->data.type.variadic = 1;
     }
@@ -505,7 +507,7 @@ struct ast_node* parse_new_expression(struct parse_ctx* ctx, struct token*** tok
     ALLOC_NODE(AST_NODE_NEW);
     START_NODE(node);
     EXPECT_TOKEN(TOKEN_NEW, "new");
-    node->data.new.type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
+    node->data.new.type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1, 0);
     CHECK_EXPR_AND(node->data.new.type, free_ast_node(node));
     END_NODE(node);
     return node;
@@ -643,19 +645,28 @@ struct ast_node* parse_primary_expression(struct parse_ctx* ctx, struct token***
         return node;
         case TOKEN_PROTOFUNC:;
         uint8_t protofunc = 1;
+        uint8_t cons = 0;
+        goto pf;
+        case TOKEN_CONST:
+        cons = 1;
         goto pf;
         case TOKEN_IDENTIFIER:
         protofunc = 0;
+        cons = 0;
         pf:;
         START_DUMMY_NODE();
         STORE_TOKEN_STATE(state1);
-        char* v1 = EAT(TOKEN_IDENTIFIER)->value;
+        char* v1 = (protofunc || cons) ? NULL : EAT(TOKEN_IDENTIFIER)->value;
         if (MATCH_TYPE()) {
             STORE_TOKEN_STATE(state2);
             RESTORE_TOKEN_STATE(state1);
-            node = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, 0, 0, 1, 0);
+            node = parse_vardecl(ctx, tokens, token_count, 0, 0, 0, 0, cons, 0, 1, 0);
             if (node != NULL) {
                 return node;
+            } else {
+                if (protofunc || cons) {
+                    return NULL;
+                }
             }
             RESTORE_TOKEN_STATE(state2);
         } else if (!(ctx->flags & 4) && MATCH(TOKEN_COLON)) {
@@ -832,7 +843,7 @@ struct ast_node* parse_unary_expression(struct parse_ctx* ctx, struct token*** t
             ALLOC_NODE_DUMMY(AST_NODE_CAST);
             STORE_TOKEN_STATE(state1);
             COPY_DUMMY_TO_REAL(node);
-            node->data.cast.type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
+            node->data.cast.type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1, 0);
             if (node->data.cast.type == NULL || !EAT(TOKEN_RPAREN)) {
                 RESTORE_TOKEN_STATE(state1);
                 BACKTRACK();
@@ -1393,7 +1404,9 @@ struct ast_node* parse_vardecl(struct parse_ctx* ctx, struct token*** tokens, si
     node->data.vardecl.csig = csig;
     node->data.vardecl.stat = stat;
     node->data.vardecl.cons = cons;
-    node->data.vardecl.type = parse_type(ctx, tokens, token_count, can_variadic, 1, 1, 1);
+    node->data.vardecl.type = parse_type(ctx, tokens, token_count, can_variadic, 1, 1, 1, 1);
+    node->data.vardecl.type->data.type.cons |= cons;
+    node->data.vardecl.cons |= node->data.vardecl.type->data.type.cons;
     CHECK_EXPR_AND(node->data.vardecl.type, free_ast_node(node));
     EXPECT_TOKEN(TOKEN_IDENTIFIER, "identifier");
     node->data.vardecl.name = ttok->value;
@@ -1436,7 +1449,7 @@ struct ast_node* parse_func(struct parse_ctx* ctx, struct token*** tokens, size_
     node->data.func.csig = csig;
     node->data.func.stat = stat;
     node->data.func.pure = pure;
-    node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
+    node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1, 1);
     CHECK_EXPR_AND(node->data.func.return_type, free_ast_node(node));
     struct token* name_token = EAT(TOKEN_IDENTIFIER);
     node->data.func.name = name_token == NULL ? NULL : name_token->value;
@@ -1487,7 +1500,7 @@ struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens
         EXPECT_TOKEN(TOKEN_GT, ">");
     }
     if (MATCH_TYPE()) {
-        node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1);
+        node->data.func.return_type = parse_type(ctx, tokens, token_count, 0, 1, 1, 1, 1);
         CHECK_EXPR_AND(node->data.func.return_type, free_ast_node(node));
     }
     EXPECT_TOKEN(TOKEN_ARROW, "=>");
@@ -1497,23 +1510,22 @@ struct ast_node* parse_lambda_func(struct parse_ctx* ctx, struct token*** tokens
     return node;
 }
 
-struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t typed, uint8_t synch, uint8_t virt, uint8_t iface, uint8_t pure) {
+struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size_t* token_count, uint8_t prot, uint8_t synch, uint8_t virt, uint8_t iface, uint8_t pure) {
     INIT_PARSE_FUNC();
     ALLOC_NODE(AST_NODE_CLASS);
     START_NODE(node);
     node->data.class.prot = prot;
-    node->data.class.typed = typed;
     node->data.class.synch = synch;
     node->data.class.virt = virt;
     node->data.class.iface = iface;
     node->data.class.pure = pure;
     EXPECT_TOKEN(TOKEN_CLASS, "class");
-    node->data.class.name = parse_type(ctx, tokens, token_count, 0, 0, 1, 1);
+    node->data.class.name = parse_type(ctx, tokens, token_count, 0, 0, 1, 1, 0);
     CHECK_EXPR_AND(node->data.class.name, free_ast_node(node));
     if (EAT(TOKEN_COLON)) {
         node->data.class.parents = arraylist_new(2, sizeof(struct ast_node*));
         do {
-            struct ast_node* type = parse_type(ctx, tokens, token_count, 0, 0, 1, 0);
+            struct ast_node* type = parse_type(ctx, tokens, token_count, 0, 0, 1, 0, 0);
             CHECK_EXPR_AND(type, free_ast_node(node));
             arraylist_addptr(node->data.class.parents, type);
         } while (EAT(TOKEN_COMMA));
@@ -1549,6 +1561,9 @@ struct ast_node* parse_class(struct parse_ctx* ctx, struct token*** tokens, size
         } else if (!MATCH(TOKEN_RCURLY)) {
             PARSE_ERROR_UNEXPECTED_TOKEN(EOF_ERROR_TOKEN, "'func', '<', type, or '}'. Confirm correct modifiers");
         } else {
+            if (prot != PROTECTION_NONE || synch || virt || iface || async || csig || pure || cons) {
+                PARSE_ERROR_UNEXPECTED_TOKEN(EOF_ERROR_TOKEN, "'func', '<', type, or '}'");
+            }
             break;
         }
     }
@@ -1593,7 +1608,6 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
     EXPECT_TOKEN(TOKEN_LCURLY, "{");
     while (1) {
         uint8_t prot = maybe_protection(tokens, token_count);
-        uint8_t typed = EAT(TOKEN_TYPED);
         uint8_t synch = EAT(TOKEN_SYNCH);
         uint8_t virt = EAT(TOKEN_VIRT);
         uint8_t iface = EAT(TOKEN_IFACE);
@@ -1601,10 +1615,10 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
         uint8_t csig = EAT(TOKEN_CSIG);
         uint8_t cons = EAT(TOKEN_CONST);
         uint8_t pure = EAT(TOKEN_PURE);
-        uint8_t can_module = !typed && !synch && !virt && !iface && !async && !csig && !pure && !cons;
+        uint8_t can_module = !synch && !virt && !iface && !async && !csig && !pure && !cons;
         uint8_t can_class = !async && !csig && !cons;
-        uint8_t can_func = !typed && !iface && !cons;
-        uint8_t can_var = !typed && !virt && !iface && !async && !pure;
+        uint8_t can_func = !iface && !cons;
+        uint8_t can_var = !virt && !iface && !async && !pure;
         struct ast_node* child_node = NULL;
         if (can_module && MATCH(TOKEN_MODULE)) {
             child_node = parse_module(ctx, tokens, token_count, prot);
@@ -1615,7 +1629,7 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.module.body->data.body.children, child_node);
         } else if (can_class && MATCH(TOKEN_CLASS)) {
-            child_node = parse_class(ctx, tokens, token_count, prot, typed, synch, virt, iface, pure);
+            child_node = parse_class(ctx, tokens, token_count, prot, synch, virt, iface, pure);
             CHECK_EXPR_AND(child_node, free_ast_node(node));
             arraylist_addptr(node->data.module.body->data.body.children, child_node);
         } else if (can_func && MATCH(TOKEN_FUNC)) {
@@ -1636,8 +1650,8 @@ struct ast_node* parse_module(struct parse_ctx* ctx, struct token*** tokens, siz
                 break;
             }
         } else {
-            if (prot != PROTECTION_NONE || typed || synch || virt || iface || async || csig) {
-                PARSE_ERROR_UNEXPECTED_TOKEN(**tokens, "'module', 'class', 'func', '<', type, or '}'");
+            if (prot != PROTECTION_NONE || synch || virt || iface || async || csig || pure || cons) {
+                PARSE_ERROR_UNEXPECTED_TOKEN(EOF_ERROR_TOKEN, "'module', 'class', 'func', '<', type, or '}'");
             }
             break;
         }

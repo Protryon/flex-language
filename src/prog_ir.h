@@ -55,7 +55,6 @@ struct prog_class {
     struct prog_type* type;
     struct prog_file* file;
     uint8_t prot;
-    uint8_t typed;
     uint8_t synch;
     uint8_t virt;
     uint8_t iface;
@@ -119,14 +118,13 @@ struct prog_var { // only interfunc vars
 #define PROG_TYPE_FUNC 3
 
 enum prim_type {
-    PRIM_V,
-    PRIM_VOID = PRIM_V,
     PRIM_U8,
     PRIM_B = PRIM_U8,
     PRIM_BYTE = PRIM_U8,
     PRIM_C = PRIM_U8,
     PRIM_CHAR = PRIM_U8,
     PRIM_UINT8 = PRIM_U8,
+    PRIM_BOOL = PRIM_U8,
     PRIM_I8,
     PRIM_INT8 = PRIM_I8,
     PRIM_U16,
@@ -162,10 +160,12 @@ enum prim_type {
 struct prog_type {
     uint8_t type;
     char* name;
-    uint64_t ptr_array_count;
-    uint64_t ptr_array;
+    uint8_t array_dimensonality;
+    uint8_t is_ref;
     uint8_t variadic;
     uint8_t is_master;
+    uint8_t is_const;
+    uint8_t is_generic; // denotes that we are a generic variable, not that we have generics
     struct prog_type* master_type;
     struct ast_node* ast;
     struct prog_file* file;

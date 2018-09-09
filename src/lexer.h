@@ -9,7 +9,6 @@ typedef enum {
     TOKEN_UNKNOWN,
     TOKEN_IDENTIFIER,
     TOKEN_MODULE,
-    TOKEN_TYPED,
     TOKEN_CLASS,
     TOKEN_FUNC,
     TOKEN_PUB,

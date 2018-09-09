@@ -13,28 +13,31 @@ const char* whitespace = "                                                      
 #define PROG_ERROR(node, fmt, args) {arraylist_addptr(state->errors, node); fprintf(stderr, fmt "\n", args);}
 #define PROG_ERROR_AST(module, node, expecting) PROG_ERROR(node, "Error: %s @ %lu:%lu.\n%s\n%s^", expecting COMMA node->start_line COMMA node->start_col COMMA arraylist_getptr(module->file->lines, node->start_line - 1) COMMA whitespace + ((node->start_col - 1) > 256 ? 0 : (256 - (node->start_col - 1))))
 
-struct prog_type* gen_prog_type(struct ast_node* node, struct prog_file* file, uint8_t is_master, uint8_t is_generic) {
+const char* operator_fns[] = {"op_member", "op_sequence", "op_eq_val", "op_neq_val", "op_eq", "op_neq", "op_mul", "op_div", "op_mod", "op_plus", "op_minus", "op_lsh", "op_rsh", "op_lt", "op_lte", "op_gt", "op_gte", "op_inst", "op_and", "op_xor", "op_or", "op_land", "op_lor", "op_assn", "op_mul_assn", "op_div_assn", "op_mod_assn", "op_plus_assn", "op_minus_assn", "op_lsh_assn", "op_rsh_assn", "op_and_assn", "op_xor_assn", "op_or_assn", "op_land_assn", "op_lor_assn", "op_mul_assn_pre", "op_div_assn_pre", "op_mod_assn_pre", "op_plus_assn_pre", "op_minus_assn_pre", "op_lsh_assn_pre", "op_rsh_assn_pre", "op_and_assn_pre", "op_xor_assn_pre", "op_or_assn_pre", "op_land_assn_pre", "op_lor_assn_pre"};
+
+struct prog_type* gen_prog_type(struct prog_state* state, struct ast_node* node, struct prog_file* file, uint8_t is_master, uint8_t is_const, uint8_t is_generic) {
     if (node == NULL) return NULL;
     struct prog_type* t = scalloc(sizeof(struct prog_type));
     t->type = PROG_TYPE_UNKNOWN;
     t->is_master = is_master;
+    t->is_const = is_const;
     t->file = file;
     t->master_type = NULL;
     t->ast = node;
     if (node->type == AST_NODE_TYPE) {
         if (node->data.type.protofunc) {
             t->type = PROG_TYPE_FUNC;
-            t->data.func.return_type = gen_prog_type(node->data.type.protofunc_return_type, file, 0, 0);
+            t->data.func.return_type = gen_prog_type(state, node->data.type.protofunc_return_type, file, 0, 0, 0);
             t->data.func.arg_types = node->data.type.protofunc_arguments == NULL ? NULL : arraylist_new(node->data.type.protofunc_arguments->entry_count, sizeof(struct prog_type*));
             if (t->data.func.arg_types != NULL) {
                 for (size_t i = 0; i < node->data.type.protofunc_arguments->entry_count; i++) {
-                    arraylist_addptr(t->data.func.arg_types, gen_prog_type(arraylist_getptr(node->data.type.protofunc_arguments, i), file, 0, 0));
+                    arraylist_addptr(t->data.func.arg_types, gen_prog_type(state, arraylist_getptr(node->data.type.protofunc_arguments, i), file, 0, 0, 0));
                 }
             }
         } else {
             t->variadic = node->data.type.variadic;
-            t->ptr_array = node->data.type.array_pointer_bitlist;
-            t->ptr_array_count = node->data.type.array_pointer_count;
+            t->array_dimensonality = node->data.type.array_dimensonality;
+            t->is_ref = node->data.type.is_ref;
             t->name = node->data.type.name;
             if (node->data.type.generics != NULL) {
                 t->generics = new_hashmap(4);
@@ -42,7 +45,7 @@ struct prog_type* gen_prog_type(struct ast_node* node, struct prog_file* file, u
                 if (!is_master || !is_generic)
                     for (size_t i = 0; i < node->data.type.generics->entry_count; i++) {
                         struct ast_node *entry = arraylist_getptr(node->data.type.generics, i);
-                        hashmap_put(t->generics, entry->data.type.name, gen_prog_type(entry, file, is_master, 1));
+                        hashmap_put(t->generics, entry->data.type.name, gen_prog_type(state, entry, file, is_master, 0, 1));
                     }
             }
         }
@@ -60,10 +63,6 @@ struct prog_type* gen_prog_type(struct ast_node* node, struct prog_file* file, u
     int32_t prim_type = -1;
     if (t->name == NULL || t->type != PROG_TYPE_UNKNOWN) {
 
-    } else if (str_eqCase(t->name, "v")) {
-        prim_type = PRIM_V;
-    } else if (str_eqCase(t->name, "void")) {
-        prim_type = PRIM_VOID;
     } else if (str_eqCase(t->name, "u8")) {
         prim_type = PRIM_U8;
     } else if (str_eqCase(t->name, "b")) {
@@ -76,6 +75,8 @@ struct prog_type* gen_prog_type(struct ast_node* node, struct prog_file* file, u
         prim_type = PRIM_CHAR;
     } else if (str_eqCase(t->name, "uint8")) {
         prim_type = PRIM_UINT8;
+    } else if (str_eqCase(t->name, "bool")) {
+        prim_type = PRIM_BOOL;
     } else if (str_eqCase(t->name, "i8")) {
         prim_type = PRIM_I8;
     } else if (str_eqCase(t->name, "int8")) {
@@ -140,6 +141,8 @@ struct prog_type* gen_prog_type(struct ast_node* node, struct prog_file* file, u
     if (prim_type != -1) {
         t->type = PROG_TYPE_PRIMITIVE;
         t->data.prim.prim_type = prim_type;
+    } else if (t->is_ref) {
+        PROG_ERROR_AST(t, node, "only primitives can be passed by reference");
     }
     return t;
 }
@@ -166,7 +169,7 @@ struct prog_func* gen_prog_func_func(struct prog_state* state, struct prog_file*
     fun->synch = func->data.func.synch;
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
-    fun->pure = func->data.func.pure;
+    fun->pure = func->data.func.pure || parent->pure;
     fun->stat = func->data.func.stat;
     fun->arguments = new_hashmap(4);
     fun->node_map = new_hashmap(4);
@@ -180,7 +183,7 @@ struct prog_func* gen_prog_func_func(struct prog_state* state, struct prog_file*
         var->func = fun;
         var->file = fun->file;
         var->prot = PROTECTION_PRIV;
-        var->type = gen_prog_type(arg->data.vardecl.type, file, 0, 0);
+        var->type = gen_prog_type(state, arg->data.vardecl.type, file, 0, 0, 0);
         var->proc.init = arg->data.vardecl.init;
         if (var->proc.init != NULL) traverse_node(var->proc.init, preprocess_expr, &lctx, 1);
         var->proc.cons_init = arg->data.vardecl.cons_init;
@@ -191,7 +194,7 @@ struct prog_func* gen_prog_func_func(struct prog_state* state, struct prog_file*
         }
         hashmap_put(fun->arguments, var->name, var);
     }
-    fun->return_type = gen_prog_type(func->data.func.return_type, file, 0, 0);
+    fun->return_type = gen_prog_type(state, func->data.func.return_type, file, 0, 0, 0);
     fun->proc.body = func->data.func.body;
     traverse_node(fun->proc.body, preprocess_expr, &lctx, 1);
     arraylist_addptr(parent->closures, fun);
@@ -206,8 +209,8 @@ struct ast_node* preprocess_expr(struct ast_node* node, struct preprocess_ctx* c
         node->prog = scalloc(sizeof(struct prog_node));
         node->prog->ast_node = node;
         node->prog->prog_type = PROG_NODE_TYPE;
-        node->prog->data.type = gen_prog_type(node, ctx->file, 0, 1);
-        struct hashmap* om = NULL;
+        node->prog->data.type = gen_prog_type(ctx->state, node, ctx->file, 0, node->data.type.cons, 1);
+        struct hashmap *om = NULL;
         if (ctx->func != NULL) {
             om = ctx->func->node_map;
         } else if (ctx->clas != NULL) {
@@ -217,11 +220,15 @@ struct ast_node* preprocess_expr(struct ast_node* node, struct preprocess_ctx* c
         }
         if (om != NULL) hashmap_putptr(om, node, node->prog);
         hashmap_putptr(ctx->state->node_map, node, node->prog);
+    } else if (node->type == AST_NODE_VAR_DECL) {
+        if (node->data.vardecl.cons) {
+            node->data.vardecl.type->data.type.cons = 1;
+        }
     } else if (node->type == AST_NODE_FUNC) {
         node->prog = scalloc(sizeof(struct prog_node));
         node->prog->ast_node = node;
         node->prog->prog_type = PROG_NODE_EXTRACTED_FUNC_REF;
-        node->prog->data.func = gen_prog_type(node, ctx->file, 0, 1);
+        //gen_prog_type(ctx->state, node, ctx->file, 0, 1, 1);
         //TODO: if have done our variable coloring by this point, its a great place to reference our captured vars here
         hashmap_putptr(ctx->state->node_map, node, node->prog);
         if (ctx->func != NULL) {
@@ -243,12 +250,12 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct prog_file*
     fun->file = file;
     fun->closures = arraylist_new(4, sizeof(struct prog_func*));
     fun->prot = parent->prot == PROTECTION_NONE || parent->prot >= func->data.func.prot ? func->data.func.prot : parent->prot;
-    fun->virt = func->data.func.virt;
+    fun->virt = func->data.func.virt || parent->iface;
     fun->synch = func->data.func.synch;
     fun->csig = func->data.func.csig;
     fun->async = func->data.func.async;
     fun->stat = func->data.func.stat;
-    fun->pure = func->data.func.pure;
+    fun->pure = func->data.func.pure || parent->pure;
     fun->arguments = new_hashmap(4);
     fun->node_map = new_hashmap(4);
     struct prog_node* node = scalloc(sizeof(struct prog_node));
@@ -267,7 +274,7 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct prog_file*
             var->func = fun;
             var->file = fun->file;
             var->prot = PROTECTION_PRIV;
-            var->type = gen_prog_type(arg->data.vardecl.type, fun->file, 0, 0);
+            var->type = gen_prog_type(state, arg->data.vardecl.type, fun->file, 0, 0, 0);
             var->proc.init = arg->data.vardecl.init;
             if (var->proc.init != NULL) traverse_node(var->proc.init, preprocess_expr, &lctx, 1);
             var->proc.cons_init = arg->data.vardecl.cons_init;
@@ -278,7 +285,7 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct prog_file*
             }
             hashmap_put(fun->arguments, var->name, var);
         }
-    fun->return_type = gen_prog_type(func->data.func.return_type, fun->file, 0, 0);
+    fun->return_type = gen_prog_type(state, func->data.func.return_type, fun->file, 0, 0, 0);
     fun->proc.body = func->data.func.body;
     traverse_node(fun->proc.body, preprocess_expr, &lctx, 1);
     if (fun->name == NULL) {
@@ -297,8 +304,7 @@ struct prog_func* gen_prog_clas_func(struct prog_state* state, struct prog_file*
         var->csig = fun->csig;
         var->cons = 1;
         var->stat = fun->stat;
-        var->type = gen_prog_type(func, fun->file, 0, 0);
-        struct preprocess_ctx lctx = (struct preprocess_ctx) {state, NULL, parent, NULL, file};
+        var->type = gen_prog_type(state, func, fun->file, 0, 1, 0);
         hashmap_put(parent->vars, var->name, var);
     }
     return fun;
@@ -315,7 +321,7 @@ void gen_prog_clas_var(struct prog_state* state, struct prog_file* file, struct 
     var->csig = vard->data.vardecl.csig;
     var->stat = vard->data.vardecl.stat;
     var->cons = vard->data.vardecl.cons;
-    var->type = gen_prog_type(vard->data.vardecl.type, file, 0, 0);
+    var->type = gen_prog_type(state, vard->data.vardecl.type, file, 0, var->cons, 0);
     var->proc.init = vard->data.vardecl.init;
     struct preprocess_ctx lctx = (struct preprocess_ctx) {state, NULL, parent, NULL, file};
     if (var->proc.init != NULL) traverse_node(var->proc.init, preprocess_expr, &lctx, 1);
@@ -331,12 +337,11 @@ void gen_prog_clas_var(struct prog_state* state, struct prog_file* file, struct 
 void gen_prog_class(struct prog_state* state, struct prog_file* file, struct ast_node* clas, struct prog_module* parent) {
     struct prog_class* cl = scalloc(sizeof(struct prog_class));
     cl->name = clas->data.class.name->data.type.name;
-    cl->type = gen_prog_type(clas->data.class.name, file, 1, 0);
+    cl->type = gen_prog_type(state, clas->data.class.name, file, 1, 0, 0);
     cl->file = file;
     cl->type->type = PROG_TYPE_CLASS;
     cl->type->data.clas.clas = cl;
     cl->prot = parent->prot == PROTECTION_NONE || parent->prot >= clas->data.module.prot ? clas->data.module.prot : parent->prot;
-    cl->typed = clas->data.class.typed;
     cl->virt = clas->data.class.virt;
     cl->synch = clas->data.class.synch;
     cl->iface = clas->data.class.iface;
@@ -359,7 +364,7 @@ void gen_prog_class(struct prog_state* state, struct prog_file* file, struct ast
     if (clas->data.class.parents != NULL)
         for (size_t i = 0; i < clas->data.class.parents->entry_count; i++) {
             struct ast_node* node = arraylist_getptr(clas->data.class.parents, i);
-            arraylist_addptr(cl->parents, gen_prog_type(node, file, 0, 0));
+            arraylist_addptr(cl->parents, gen_prog_type(state, node, file, 0, 0, 0));
         }
 }
 
@@ -395,7 +400,7 @@ struct prog_func* gen_prog_mod_func(struct prog_state* state, struct prog_file* 
             var->func = fun;
             var->file = fun->file;
             var->prot = PROTECTION_PRIV;
-            var->type = gen_prog_type(arg->data.vardecl.type, file, 0, 0);
+            var->type = gen_prog_type(state, arg->data.vardecl.type, file, 0, 0, 0);
             var->proc.init = arg->data.vardecl.init;
             if (var->proc.init != NULL) traverse_node(var->proc.init, preprocess_expr, &lctx, 1);
             var->proc.cons_init = arg->data.vardecl.cons_init;
@@ -406,7 +411,7 @@ struct prog_func* gen_prog_mod_func(struct prog_state* state, struct prog_file* 
             }
             hashmap_put(fun->arguments, var->name, var);
         }
-    fun->return_type = gen_prog_type(func->data.func.return_type, file, 0, 0);
+    fun->return_type = gen_prog_type(state, func->data.func.return_type, file, 0, 0, 0);
     fun->proc.body = func->data.func.body;
     traverse_node(fun->proc.body, preprocess_expr, &lctx, 1);
     if (fun->name == NULL) {
@@ -425,8 +430,7 @@ struct prog_func* gen_prog_mod_func(struct prog_state* state, struct prog_file* 
         var->csig = fun->csig;
         var->cons = 1;
         var->stat = fun->stat;
-        var->type = gen_prog_type(func, fun->file, 0, 0);
-        struct preprocess_ctx lctx = (struct preprocess_ctx) {state, parent, NULL, NULL, file};
+        var->type = gen_prog_type(state, func, fun->file, 0, 1, 0);
         hashmap_put(parent->vars, var->name, var);
     }
     return fun;
@@ -443,7 +447,7 @@ void gen_prog_mod_var(struct prog_state* state, struct prog_file* file, struct a
     var->csig = vard->data.vardecl.csig;
     var->stat = vard->data.vardecl.stat;
     var->cons = vard->data.vardecl.cons;
-    var->type = gen_prog_type(vard->data.vardecl.type, file, 0, 0);
+    var->type = gen_prog_type(state, vard->data.vardecl.type, file, 0, var->cons, 0);
     var->proc.init = vard->data.vardecl.init;
     struct preprocess_ctx lctx = (struct preprocess_ctx) {state, NULL, NULL, parent, file};
     if (var->proc.init != NULL) traverse_node(var->proc.init, preprocess_expr, &lctx, 1);
@@ -634,6 +638,8 @@ void provide_master_types(struct prog_state* state, struct prog_module* mod, str
     struct prog_type* master = clas == NULL || no_immed_generics || clas->type->generics == NULL ? NULL : hashmap_get(clas->type->generics, type->name);
     if (master == NULL) {
         master = hashmap_get(mod->types, type->name);
+    } else {
+        type->is_generic = 1;
     }
     struct {
         struct prog_file* file;
@@ -747,15 +753,230 @@ struct prog_scope {
 
 #define TRAVERSE_NEW_FUNC(item) root->type == AST_NODE_FUNC ? root : nearest_func
 #define TRAVERSE(item) scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, stack);
-#define TRAVERSE_SCOPED(item) if (item != NULL) { ALLOC_SCOPE(scope, item); scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, scope); }
+#define TRAVERSE_SCOPED(item, name) if (item != NULL) { ALLOC_SCOPE(scope, item); name = scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, scope); }
 #define TRAVERSE_PRESCOPED_SPEC(item, scope) if (item != NULL) { scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, scope); }
 #define TRAVERSE_PRESCOPED(item) TRAVERSE_PRESCOPED_SPEC(item, scope)
-#define TRAVERSE_ARRAYLIST(list) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, stack); } }
-#define TRAVERSE_ARRAYLIST_SCOPED(list) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); if (item != NULL) { ALLOC_SCOPE(scope, item); scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, scope); } } }
-#define TRAVERSE_ARRAYLIST_PRESCOPED(list) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); if (item != NULL) { scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, scope); } } }
+#define TRAVERSE_ARRAYLIST(list, name) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); name = scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, stack); } }
+#define TRAVERSE_ARRAYLIST_SCOPED(list, name) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); if (item != NULL) { ALLOC_SCOPE(scope, item); name = scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, scope); } } }
+#define TRAVERSE_ARRAYLIST_PRESCOPED(list, name) if (list != NULL) { for (size_t i = 0; i < list->entry_count; i++) { struct ast_node* item = arraylist_getptr(list, i); if (item != NULL) { name = scope_analysis_expr(state, item, file, TRAVERSE_NEW_FUNC(item), mod, clas, scope); } } }
 
-void scope_analysis_expr(struct prog_state* state, struct ast_node* root, struct prog_file* file, struct ast_node* nearest_func, struct prog_module* mod, struct prog_class* clas, struct prog_scope* stack) {
-    if (root == NULL) return;
+// does not support generic classes... very well... so don't make generic primitives?
+struct prog_type* unbox_primitive(struct prog_state* state, struct prog_type* type, struct ast_node* for_node) {
+    if (type->type != PROG_TYPE_PRIMITIVE && type->type != PROG_TYPE_FUNC) {
+        return type;
+    }
+    struct prog_module* langModule = hashmap_get(state->modules, "lang");
+    if (langModule == NULL) {
+        PROG_ERROR_AST(type, for_node, "cannot unbox type: lang module not found");
+        return NULL;
+    }
+    char* class_name = NULL;
+    if (type->type == PROG_TYPE_PRIMITIVE) {
+        switch (type->data.prim.prim_type) {
+            case PRIM_U8:
+                class_name = "UInt8";
+                break;
+            case PRIM_I8:
+                class_name = "Int8";
+                break;
+            case PRIM_U16:
+                class_name = "UInt16";
+                break;
+            case PRIM_I16:
+                class_name = "Int16";
+                break;
+            case PRIM_U32:
+                class_name = "UInt32";
+                break;
+            case PRIM_I32:
+                class_name = "Int32";
+                break;
+            case PRIM_U64:
+                class_name = "UInt64";
+                break;
+            case PRIM_I64:
+                class_name = "Int64";
+                break;
+            case PRIM_F:
+                class_name = "Float";
+                break;
+            case PRIM_D:
+                class_name = "Double";
+                break;
+            default: PROG_ERROR_AST(type, for_node, "cannot unbox type: illegal primitive");
+                return NULL;
+        }
+    } else {
+        class_name = "Function";
+    }
+    struct prog_class* clas = hashmap_get(langModule->classes, class_name);
+    if (clas == NULL) {
+        PROG_ERROR_AST(type, for_node, "cannot unbox type: lang module doesn't implement unboxed type class");
+        return NULL;
+    }
+    return clas->type;
+}
+
+int type_equal(struct prog_type* t1, struct prog_type* t2) {
+    if (t1 == t2) return 1;
+    if (t1->type != t2->type) return 0;
+    if (!(t1->is_ref == t2->is_ref && t1->array_dimensonality == t2->array_dimensonality && t1->variadic != t2->variadic && t1->is_const == t2->is_const)) return 0;
+    if (t1->type == PROG_TYPE_UNKNOWN) return 0;
+    if (t1->type == PROG_TYPE_PRIMITIVE) return t1->data.prim.prim_type == t2->data.prim.prim_type;
+    if (t1->type == PROG_TYPE_FUNC) {
+        if (!type_equal(t1->data.func.return_type, t2->data.func.return_type)) return 0;
+        if (t1->data.func.arg_types->entry_count != t2->data.func.arg_types->entry_count) return 0;
+        for (size_t i = 0; i < t1->data.func.arg_types->entry_count; i++) {
+            if (!type_equal(arraylist_getptr(t1->data.func.arg_types, i), arraylist_getptr(t2->data.func.arg_types, i))) return 0;
+        }
+        return 1;
+    }
+    if (t1->type == PROG_TYPE_CLASS) {
+        return t1->data.clas.clas == t2->data.clas.clas;
+    }
+    return 0;
+}
+
+int class_subtype(struct prog_class* c1, struct prog_class* c2) {
+    if (c1 == c2 && c1 != NULL) return 1;
+    if (c1 == NULL || c2 == NULL || c2->parents == NULL) return 0;
+    if (arraylist_indexptr(c2->parents, c1) != -1) {
+        return 1;
+    }
+    for (size_t i = 0; i < c2->parents->entry_count; i++) {
+        if (class_subtype(c1, arraylist_getptr(c2->parents, i))) return 1;
+    }
+    return 0;
+}
+
+int type_subtype(struct prog_type* t1, struct prog_type* t2) {
+    if (type_equal(t1, t2)) return 1;
+    if (t1->type != t2->type) return 0;
+    if (!(t1->is_ref == t2->is_ref && t1->array_dimensonality == t2->array_dimensonality && t1->variadic != t2->variadic && t1->is_const == t2->is_const)) return 0;
+    if (t1->type == PROG_TYPE_UNKNOWN) return 0;
+    if (t1->type == PROG_TYPE_PRIMITIVE) return t1->data.prim.prim_type == t2->data.prim.prim_type;
+    if (t1->type == PROG_TYPE_FUNC) {
+        if (!type_subtype(t1->data.func.return_type, t2->data.func.return_type)) return 0;
+        if (t1->data.func.arg_types->entry_count != t2->data.func.arg_types->entry_count) return 0;
+        for (size_t i = 0; i < t1->data.func.arg_types->entry_count; i++) {
+            if (!type_subtype(arraylist_getptr(t1->data.func.arg_types, i), arraylist_getptr(t2->data.func.arg_types, i))) return 0;
+        }
+        return 1;
+    }
+    if (t1->type == PROG_TYPE_CLASS) {
+        return class_subtype(t1->data.clas.clas, t2->data.clas.clas);
+    }
+    return 0;
+}
+
+struct prog_type* type_inf_binary_expr(struct prog_state* state, struct ast_node* root, struct prog_type* t1, struct prog_type* t2, uint16_t bin_op) {
+    if (bin_op <= BINARY_OP_START_ARITH) {
+        return NULL;
+    }
+    //TODO: this is where we should do autounboxing
+    //TODO: this function blatantly memory leaks with no hopes of freeing, but the OS can deal with that.
+    //TODO: we should autoconstruct objects here for operator overloading and stuff
+    if (t1->type != t2->type || t1->type == PROG_TYPE_UNKNOWN) {
+        return NULL;
+    }
+    if (t1->type == PROG_TYPE_FUNC) {
+        if (t1->is_ref || t2->is_ref) {
+            PROG_ERROR_AST(t1, root->data.binary.left, "cannot have indirect reference to function");
+            return NULL;
+        }
+        if (bin_op == BINARY_OP_EQ || bin_op == BINARY_OP_EQ_VAL) {
+            struct prog_type* ret_type = scalloc(sizeof(struct prog_type));
+            ret_type->type = PROG_TYPE_PRIMITIVE;
+            ret_type->is_ref = 0;
+            ret_type->data.prim.prim_type = PRIM_BOOL;
+            ret_type->ast = root;
+            ret_type->file = t1->file;
+            return ret_type;
+        } else if (bin_op == BINARY_OP_ASSN) {
+            if (t1->is_const) {
+                PROG_ERROR_AST(t1, root->data.binary.left, "expecting mutable value for assignment");
+                return NULL;
+            }
+            if (!type_subtype(t1, t2)) {
+                PROG_ERROR_AST(t1, root, "invalid type for assignment");
+                return NULL;
+            }
+            return bin_op == BINARY_OP_ASSN ? t2 : t1; //TODO:  always t2, we need a ASSN_PRE op
+        } else {
+            PROG_ERROR_AST(t1, root, "illegal operation on function");
+            return NULL;
+        }
+    } else if (t1->type == PROG_TYPE_PRIMITIVE) {
+        if (bin_op == BINARY_OP_EQ || bin_op == BINARY_OP_EQ_VAL) {
+            struct prog_type* ret_type = scalloc(sizeof(struct prog_type));
+            ret_type->type = PROG_TYPE_PRIMITIVE;
+            ret_type->is_ref = 0;
+            ret_type->data.prim.prim_type = PRIM_BOOL;
+            ret_type->ast = root;
+            ret_type->file = t1->file;
+            return ret_type;
+        } else if (bin_op > BINARY_OP_ASSNT) {
+            if (t1->is_const) {
+                PROG_ERROR_AST(t1, root->data.binary.left, "expecting mutable value for assignment");
+                return NULL;
+            }
+            if (!type_equal(t1, t2)) {
+                PROG_ERROR_AST(t1, root, "unequal types for assignment");
+                return NULL;
+            }
+            return bin_op > BINARY_OP_ASSN_PRE ? t1 : t2;
+        } else {
+            if (!type_equal(t1, t2)) {
+                PROG_ERROR_AST(t1, root, "unequal types for expression");
+                return NULL;
+            }
+            return t1;
+        }
+    } else if (t1->type == PROG_TYPE_CLASS) {
+        if (t1->is_ref || t2->is_ref) {
+            PROG_ERROR_AST(t1, root->data.binary.left, "cannot have indirect reference to class");
+            return NULL;
+        }
+        if (bin_op == BINARY_OP_EQ || bin_op == BINARY_OP_EQ_VAL) {
+            struct prog_type* ret_type = scalloc(sizeof(struct prog_type));
+            ret_type->type = PROG_TYPE_PRIMITIVE;
+            ret_type->is_ref = 0;
+            ret_type->data.prim.prim_type = PRIM_BOOL;
+            ret_type->ast = root;
+            ret_type->file = t1->file;
+            return ret_type;
+        } else if (bin_op == BINARY_OP_ASSN) {
+            if (t1->is_const) {
+                PROG_ERROR_AST(t1, root->data.binary.left, "expecting mutable value for assignment");
+                return NULL;
+            }
+            if (!type_subtype(t1, t2)) {
+                PROG_ERROR_AST(t1, root, "invalid type for assignment");
+                return NULL;
+            }
+            // we do not require definitions for these operators, nor will they be called.
+            return t2;
+        } else {
+            if (bin_op > BINARY_OP_ASSN && t1->is_const) {
+                PROG_ERROR_AST(t1, root->data.binary.left, "expecting mutable value for assignment");
+                return NULL;
+            }
+            if (!type_subtype(t1, t2)) {
+                PROG_ERROR_AST(t1, root, "invalid type for expression");
+                return NULL;
+            }
+            if (!hashmap_get(t1->data.clas.clas->funcs, operator_fns[bin_op]) {
+                PROG_ERROR_AST(t1, root, "operator not defined for class");
+                return NULL;
+            }
+            return t1;
+        }
+    }
+}
+
+// also does type inference
+struct prog_type* scope_analysis_expr(struct prog_state* state, struct ast_node* root, struct prog_file* file, struct ast_node* nearest_func, struct prog_module* mod, struct prog_class* clas, struct prog_scope* stack) {
+    if (root == NULL) return NULL;
     struct prog_scope* cstack = stack;
     if (root->scope_override) {
         stack = scalloc(sizeof(struct prog_scope));
@@ -772,19 +993,46 @@ void scope_analysis_expr(struct prog_state* state, struct ast_node* root, struct
     } file_cont;
     file_cont.file = file;
     switch (root->type) {
-        case AST_NODE_BINARY:
+        case AST_NODE_BINARY:;
+        struct prog_type* btype1 = NULL;
+        struct prog_type* btype2 = NULL;
         if (root->data.binary.op == BINARY_OP_LAND || root->data.binary.op == BINARY_OP_LOR) {
-            TRAVERSE_SCOPED(root->data.binary.left);
-            TRAVERSE_SCOPED(root->data.binary.right);
+            TRAVERSE_SCOPED(root->data.binary.left, btype1);
+            TRAVERSE_SCOPED(root->data.binary.right, btype2);
+        } else if (root->data.binary.op == BINARY_OP_MEMBER) {
+            struct prog_type* base_expr = TRAVERSE(root->data.binary.left);
+            if (base_expr == NULL) return NULL;
+            base_expr = unbox_primitive(state, base_expr, root->data.binary.left);
+            if (base_expr == NULL) {
+                return NULL;
+            }
+            if (base_expr->type == PROG_TYPE_UNKNOWN) {
+                PROG_ERROR_AST((&file_cont), root->data.binary.left, "type inference failed: type is unknown");
+                return NULL;
+            }
+            // now 100% a class
+            struct prog_class* clas = base_expr->data.clas.clas;
+            struct prog_var* sub_var = hashmap_get(clas->vars, root->data.binary.right->data.identifier.identifier);
+            if (sub_var == NULL) {
+                PROG_ERROR_AST((&file_cont), root->data.binary.right, "not a member of parent class");
+                return NULL;
+            }
+            return sub_var->type;
         } else {
-            TRAVERSE(root->data.binary.left);
-            if(root->data.binary.op != BINARY_OP_MEMBER)
-                TRAVERSE(root->data.binary.right);
+            btype1 = TRAVERSE(root->data.binary.left);
+            btype2 = TRAVERSE(root->data.binary.right);
         }
-        break;
-        case AST_NODE_BODY:
-        TRAVERSE_ARRAYLIST_SCOPED(root->data.body.children);
-        break;
+        if (btype1 == NULL || btype2 == NULL) {
+            return NULL;
+        }
+        if (root->data.binary.op == BINARY_OP_SEQUENCE) {
+            return btype2;
+        }
+        return type_inf_binary_expr(state, root, btype1, btype2, root->data.binary.op);
+        case AST_NODE_BODY:;
+        struct prog_type* lt = NULL;
+        TRAVERSE_ARRAYLIST_SCOPED(root->data.body.children, lt);
+        return lt;
         case AST_NODE_CALC_MEMBER:
         TRAVERSE_SCOPED(root->data.calc_member.parent);
         TRAVERSE_SCOPED(root->data.calc_member.calc);
@@ -840,7 +1088,7 @@ void scope_analysis_expr(struct prog_state* state, struct ast_node* root, struct
                         var->csig = func->csig;
                         var->cons = 1;
                         var->stat = func->stat;
-                        var->type = gen_prog_type(func, clas->file, 0, 0);
+                        var->type = gen_prog_type(state, func, clas->file, 0, 1, 0);
                         hashmap_put(stack->vars, func->name, var);
                     }
                 }
@@ -1083,10 +1331,9 @@ struct prog_state* gen_prog(struct arraylist* files) {
 
     /*
     plan:
-    error reporting for scope analysis
-    test scope analysis
+
     type inference & type expr propagation
-    implcit cast insertion?
+    implicit cast insertion?
     generic duplication/mutation
     color all function/(class/global variable) combos: externally mutable, externally accessible, mutable, accessable
     color reference entry/exit to functions
