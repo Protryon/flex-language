@@ -317,3 +317,19 @@ void hashset_fixcap(struct hashset* set) {
         set->bucket_count = nbuck_count;
     }
 }
+
+struct hashmap* hashmap_clone(struct hashmap* hashmap) {
+    struct hashmap* newmap = new_hashmap(hashmap->bucket_count);
+    for (size_t i = 0; i < hashmap->bucket_count; i++) {
+        if (hashmap->buckets[i] == NULL) continue;
+        struct hashmap_bucket_entry** newbucket = &newmap->buckets[i];
+        for (struct hashmap_bucket_entry* bucket = hashmap->buckets[i]; bucket != NULL; bucket = bucket->next) {
+            (*newbucket) = scalloc(sizeof(struct hashmap_bucket_entry));
+            (*newbucket)->data = bucket->data;
+            (*newbucket)->key = bucket->key;
+            (*newbucket)->umod_hash = bucket->umod_hash;
+            newbucket = &((*newbucket)->next);
+        }
+    }
+    return newmap;
+}

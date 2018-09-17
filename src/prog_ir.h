@@ -83,6 +83,7 @@ struct prog_func {
     uint8_t pure;
     struct prog_type* return_type;
     struct hashmap* arguments;
+    struct arraylist* arguments_list;
     struct hashmap* node_map;
     struct arraylist* closures;
     struct {
@@ -162,10 +163,11 @@ struct prog_type {
     char* name;
     uint8_t array_dimensonality;
     uint8_t is_ref;
-    uint8_t variadic;
+    uint8_t variadic; // only used for function param types
     uint8_t is_master;
     uint8_t is_const;
     uint8_t is_generic; // denotes that we are a generic variable, not that we have generics
+    uint8_t is_optional; // only used for function param types
     struct prog_type* master_type;
     struct ast_node* ast;
     struct prog_file* file;

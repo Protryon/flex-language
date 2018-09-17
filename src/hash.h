@@ -61,4 +61,6 @@ void hashset_add(struct hashset* set, char* key);
 
 void hashset_addptr(struct hashset* set, void* key);
 
+struct hashmap* hashmap_clone(struct hashmap* hashmap);
+
 #endif
